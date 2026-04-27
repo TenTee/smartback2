@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SmartCampus API - Documentation API</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --panel-soft: #eef4ff;
+      --text: #122033;
+      --muted: #5f6f85;
+      --line: #d9e2ef;
+      --accent: #0f62fe;
+      --accent-2: #13315c;
+      --success: #198754;
+      --danger: #dc2626;
+      --put: #7c3aed;
+      --patch: #ea580c;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: linear-gradient(180deg, #eef5ff 0%, var(--bg) 28%, #f8fbff 100%); color: var(--text); font-family: var(--sans); }
+    .layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; align-self: start; height: 100vh; overflow: auto; background: rgba(19,49,92,.97); color: #fff; padding: 24px 18px; }
+    .brand h1 { margin: 0 0 8px; font-size: 1.4rem; }
+    .brand p { margin: 0 0 18px; color: rgba(255,255,255,.8); line-height: 1.5; }
+    .search { width: 100%; margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.08); color: #fff; outline: none; }
+    .search::placeholder { color: rgba(255,255,255,.55); }
+    .nav-group { margin-bottom: 18px; }
+    .nav-title { display: flex; justify-content: space-between; align-items: center; font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,.62); margin-bottom: 10px; }
+    .nav-links { display: grid; gap: 8px; }
+    .nav-links a { color: #fff; text-decoration: none; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.04); font-size: .95rem; line-height: 1.35; }
+    .nav-links a:hover { background: rgba(255,255,255,.1); }
+    .main { padding: 32px; }
+    .hero { background: radial-gradient(circle at top right, rgba(15,98,254,.18), transparent 34%), linear-gradient(135deg, #fff 0%, #f4f8ff 100%); border: 1px solid var(--line); border-radius: 24px; padding: 28px; box-shadow: 0 20px 45px rgba(16,42,67,.08); margin-bottom: 22px; }
+    .hero-top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+    .hero h2 { margin: 0 0 10px; font-size: 2rem; }
+    .hero p { margin: 0; color: var(--muted); max-width: 900px; white-space: pre-line; line-height: 1.6; }
+    .version { display: inline-flex; align-items: center; padding: 10px 14px; border-radius: 999px; background: var(--accent-2); color: #fff; font-weight: 700; }
+    .section { margin-top: 28px; }
+    .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+    .section h3 { margin: 0; font-size: 1.5rem; }
+    .section-count { color: var(--muted); font-size: .95rem; }
+    .endpoint-list { display: grid; gap: 16px; }
+    .endpoint { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; box-shadow: 0 12px 36px rgba(15,23,42,.06); }
+    .endpoint-top { display: flex; gap: 14px; align-items: center; padding: 18px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    .method { font-weight: 800; color: #fff; border-radius: 999px; padding: 7px 12px; min-width: 74px; text-align: center; font-size: .82rem; letter-spacing: .06em; }
+    .method.GET { background: var(--success); }
+    .method.POST { background: var(--accent); }
+    .method.PUT { background: var(--put); }
+    .method.PATCH { background: var(--patch); }
+    .method.DELETE { background: var(--danger); }
+    .endpoint-path { font-family: var(--mono); font-size: 1rem; word-break: break-all; color: var(--accent-2); font-weight: 700; }
+    .endpoint-title { font-weight: 700; font-size: 1.05rem; }
+    .endpoint-body { padding: 18px 20px 22px; display: grid; gap: 18px; }
+    .desc { color: var(--muted); line-height: 1.6; white-space: pre-line; }
+    pre { margin: 0; white-space: pre-wrap; word-break: break-word; background: #0f172a; color: #dbeafe; padding: 14px; border-radius: 14px; font-size: .83rem; line-height: 1.55; overflow: auto; font-family: var(--mono); }
+    .footer { margin-top: 30px; color: var(--muted); text-align: center; font-size: .92rem; }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } .main { padding: 20px; } .hero { padding: 22px; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>SmartCampus API</h1>
+        <p>Documentation mise à jour depuis l'analyse des routes backend pour faciliter l'implémentation frontend.</p>
+      </div>
+      <input id="search" class="search" type="search" placeholder="Rechercher une route, un module, une méthode..." />
+      <div id="sidebar-nav">
+        <div class="nav-group">
+          <div class="nav-title">Sections</div>
+          <div class="nav-links">
+            <a href="#auth">Authentification</a>
+            <a href="#users">Utilisateurs</a>
+            <a href="#files">Fichiers</a>
+            <a href="#formations">Formations</a>
+            <a href="#etudiants">Étudiants</a>
+            <a href="#paiements">Paiements</a>
+            <a href="#paie">Paie</a>
+            <a href="#personnels">Personnels</a>
+            <a href="#inventaires">Inventaires</a>
+            <a href="#depenses">Dépenses</a>
+            <a href="#conges">Congés</a>
+            <a href="#demandes">Demandes</a>
+            <a href="#modules">Modules</a>
+            <a href="#emplois-du-temps">Emplois du temps</a>
+            <a href="#notes">Notes</a>
+            <a href="#assiduite">Assiduité</a>
+            <a href="#communication">Communication</a>
+            <a href="#revenus">Revenus</a>
+            <a href="#admin-api">Admin API</a>
+            <a href="#academique-v2">Académique v2</a>
+            <a href="#openapi">OpenAPI</a>
+          </div>
+        </div>
+      </div>
+    </aside>
+    <main class="main">
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <h2>SmartCampus API</h2>
+            <p>Documentation complète du backend <code>smartback-new</code>.
+
+Cette page présente toutes les routes exposées et leurs actions pour accélérer l'intégration frontend.</p>
+          </div>
+          <div class="version">Version 1.0.0</div>
+        </div>
+      </section>
+      <div id="content">
+        <section id="auth" class="section">
+          <div class="section-header"><h3>Authentification</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/auth/login/</div><div class="endpoint-title">Obtenir un token JWT</div></div></div>
+              <div class="endpoint-body"><p class="desc">Authentifie un utilisateur avec username et password, retourne les tokens JWT access et refresh.</p><h4>Requête</h4><pre>{"username": "string", "password": "string"}</pre><h4>Réponse</h4><pre>{"access": "jwt_access_token", "refresh": "jwt_refresh_token"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/auth/token/refresh/</div><div class="endpoint-title">Renouveler le token JWT</div></div></div>
+              <div class="endpoint-body"><p class="desc">Renouvelle le token d'accès en utilisant le refresh token.</p><h4>Requête</h4><pre>{"refresh": "string"}</pre><h4>Réponse</h4><pre>{"access": "new_jwt_access_token"}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="users" class="section">
+          <div class="section-header"><h3>Utilisateurs</h3><span class="section-count">8 endpoints</span></div>
+          <p class="desc">Gestion des utilisateurs (CustomUser) avec rôles. Les routes sont sous /api/auth/ et /api/users/.</p>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/auth/</div><div class="endpoint-title">Lister les utilisateurs</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère la liste des utilisateurs.</p><h4>Réponse</h4><pre>[{"id": 1, "noms": "string", "prenoms": "string", "email": "string", "role": "string", "username": "string"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/auth/</div><div class="endpoint-title">Créer un utilisateur</div></div></div>
+              <div class="endpoint-body"><p class="desc">Crée un utilisateur. Génère automatiquement username et password.</p><h4>Requête</h4><pre>{"noms": "string", "prenoms": "string", "email": "string", "role": "string"}</pre><h4>Réponse</h4><pre>{"id": 1, "noms": "string", "prenoms": "string", "email": "string", "role": "string", "username": "string", "raw_password": "generated_password"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/auth/&lt;id&gt;/</div><div class="endpoint-title">Détails utilisateur</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère un utilisateur par son identifiant.</p><h4>Réponse</h4><pre>{"id": 1, "noms": "string", "prenoms": "string", "email": "string", "role": "string", "username": "string"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method PATCH">PATCH</span><div><div class="endpoint-path">/api/auth/&lt;id&gt;/</div><div class="endpoint-title">Mettre à jour un utilisateur</div></div></div>
+              <div class="endpoint-body"><p class="desc">Modifie partiellement un utilisateur.</p><h4>Requête</h4><pre>{"noms": "string", "prenoms": "string", "email": "string", "role": "string"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method DELETE">DELETE</span><div><div class="endpoint-path">/api/auth/&lt;id&gt;/</div><div class="endpoint-title">Supprimer un utilisateur</div></div></div>
+              <div class="endpoint-body"><p class="desc">Supprime un utilisateur.</p></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/auth/&lt;id&gt;/reset-password/</div><div class="endpoint-title">Réinitialiser le mot de passe</div></div></div>
+              <div class="endpoint-body"><p class="desc">Déclenche la réinitialisation de mot de passe pour un utilisateur.</p><h4>Réponse</h4><pre>{"new_password": "generated_password"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/auth/roles/</div><div class="endpoint-title">Lister les rôles</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les rôles disponibles.</p><h4>Réponse</h4><pre>[{"code": "string", "libelle": "string", "can_manage_rh": true, ...}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/auth/roles/</div><div class="endpoint-title">Créer un rôle</div></div></div>
+              <div class="endpoint-body"><p class="desc">Crée une nouvelle définition de rôle.</p><h4>Requête</h4><pre>{"code": "string", "libelle": "string", "can_manage_rh": true, "can_manage_pedagogie": false, ...}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="files" class="section">
+          <div class="section-header"><h3>Fichiers</h3><span class="section-count">4 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/files/</div><div class="endpoint-title">Lister les fichiers</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les fichiers existants pour l'utilisateur connecté.</p><h4>Réponse</h4><pre>[{"id": 1, "name": "string", "file": "url", "content_type": "string", "size": 1234, "created_at": "2023-01-01T00:00:00Z"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/files/upload/</div><div class="endpoint-title">Téléverser un fichier</div></div></div>
+              <div class="endpoint-body"><p class="desc">Upload d'un fichier via multipart/form-data. Max 5MB, types autorisés: PDF, JPEG, PNG.</p><h4>Requête</h4><pre>Content-Type: multipart/form-data
+file: <fichier></pre><h4>Réponse</h4><pre>{"id": 1, "name": "string", "file": "url", "content_type": "string", "size": 1234, "created_at": "2023-01-01T00:00:00Z"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method DELETE">DELETE</span><div><div class="endpoint-path">/api/files/&lt;id&gt;/delete/</div><div class="endpoint-title">Supprimer un fichier</div></div></div>
+              <div class="endpoint-body"><p class="desc">Supprime un fichier par identifiant. Admin/Finance peuvent supprimer tout fichier.</p></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/files/&lt;id&gt;/download/</div><div class="endpoint-title">Télécharger un fichier</div></div></div>
+              <div class="endpoint-body"><p class="desc">Télécharge le contenu du fichier.</p><h4>Réponse</h4><pre>Content-Type: <content_type>
+<file_content></pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="formations" class="section">
+          <div class="section-header"><h3>Formations</h3><span class="section-count">4 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/formations/</div><div class="endpoint-title">Lister les formations</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère toutes les formations.</p><h4>Réponse</h4><pre>[{"id": 1, "intitule": "string", "duree_mois": 24, "montant": 25000.00, "nombre_niveaux": 3, "modules": [1,2], "modules_detail": [...], "niveaux_detail": [...]}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/formations/</div><div class="endpoint-title">Créer une formation</div></div></div>
+              <div class="endpoint-body"><p class="desc">Crée une nouvelle formation. Auto-crée les niveaux selon nombre_niveaux.</p><h4>Requête</h4><pre>{"intitule": "string", "duree_mois": 24, "montant": 25000.00, "nombre_niveaux": 3, "modules": [1,2]}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/formations/&lt;id&gt;/</div><div class="endpoint-title">Détails d’une formation</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère une formation par identifiant.</p><h4>Réponse</h4><pre>{"id": 1, "intitule": "string", "duree_mois": 24, "montant": 25000.00, "nombre_niveaux": 3, "modules": [1,2], "modules_detail": [...], "niveaux_detail": [...]}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method PATCH">PATCH</span><div><div class="endpoint-path">/api/formations/&lt;id&gt;/</div><div class="endpoint-title">Mettre à jour une formation</div></div></div>
+              <div class="endpoint-body"><p class="desc">Modifie partiellement une formation.</p><h4>Requête</h4><pre>{"intitule": "string", "duree_mois": 24, "montant": 25000.00, "modules": [1,2]}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="etudiants" class="section">
+          <div class="section-header"><h3>Étudiants & inscriptions</h3><span class="section-count">7 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/etudiants/</div><div class="endpoint-title">Lister les étudiants</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère la liste des étudiants. Filtres: ?filiere=X&module=X&niveau=X&classe=X.</p><h4>Réponse</h4><pre>[{"id": 1, "matricule": "string", "nom": "string", "contact": "string", "email": "string", "date_naissance": "2000-01-01", "filiere": {"id": 1, "intitule": "string"}, "statut": "Pré-inscrit"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/etudiants/</div><div class="endpoint-title">Créer un étudiant</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute un nouvel étudiant. Génère matricule automatiquement. Crée inscription si niveau/classe fourni.</p><h4>Requête</h4><pre>{"nom": "string", "contact": "string", "email": "string", "date_naissance": "2000-01-01", "filiere_id": 1, "niveau_id": 1, "classe_id": 1, "annee_academique_ref_id": 1}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/etudiants/&lt;id&gt;/</div><div class="endpoint-title">Détails d’un étudiant</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère un étudiant spécifique avec documents et inscriptions.</p><h4>Réponse</h4><pre>{"id": 1, "matricule": "string", "nom": "string", "contact": "string", "email": "string", "date_naissance": "2000-01-01", "filiere": {"id": 1, "intitule": "string"}, "statut": "Pré-inscrit", "documents": [...], "inscriptions": [...]}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/etudiants/&lt;id&gt;/export-documents/</div><div class="endpoint-title">Exporter les documents étudiant</div></div></div>
+              <div class="endpoint-body"><p class="desc">Génère ou télécharge les documents liés à cet étudiant sous forme de ZIP.</p><h4>Réponse</h4><pre>Content-Type: application/zip
+Content-Disposition: attachment; filename="documents_<matricule>.zip"
+<zip_file_content></pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/etudiants/&lt;id&gt;/documents/</div><div class="endpoint-title">Téléverser un document étudiant</div></div></div>
+              <div class="endpoint-body"><p class="desc">Upload d'un document attaché à l'étudiant (photo, CNI, diplôme, etc.).</p><h4>Requête</h4><pre>Content-Type: multipart/form-data
+fichier: <file>
+type_document: "Photo"</pre><h4>Réponse</h4><pre>{"id": 1, "type_document": "Photo", "fichier": "url", "date_upload": "2023-01-01T00:00:00Z"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/etudiants/&lt;id&gt;/valider-inscription/</div><div class="endpoint-title">Valider une inscription</div></div></div>
+              <div class="endpoint-body"><p class="desc">Valide l'inscription d'un étudiant. Change statut à 'Inscrit', met à jour le revenu à 'Validé', génère les notes.</p><h4>Réponse</h4><pre>{"message": "Inscription validée avec succès...", "etudiant": {...}}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/inscriptions/</div><div class="endpoint-title">Lister les inscriptions</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les inscriptions existantes. Filtres: ?etudiant=X&classe=X.</p><h4>Réponse</h4><pre>[{"id": 1, "etudiant": 1, "classe": 1, "niveau": 1, "annee_academique": "2024-2025", "date_inscription": "2023-01-01", "classe_nom": "string", "niveau_nom": "string"}]</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="paiements" class="section">
+          <div class="section-header"><h3>Paiements</h3><span class="section-count">3 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/paiements/</div><div class="endpoint-title">Lister les paiements</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les paiements enregistrés. Filtres: ?etudiant=X&frais=X.</p><h4>Réponse</h4><pre>[{"id": 1, "etudiant": 1, "formation": 1, "frais": 1, "montant_du": 25000.00, "montant_paye": 25000.00, "solde_restant": 0.00, "moyen_paiement": "cash", "justificatif": "url", "date_paiement": "2023-01-01T00:00:00Z"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/paiements/</div><div class="endpoint-title">Créer un paiement</div></div></div>
+              <div class="endpoint-body"><p class="desc">Enregistre un nouveau paiement. Premier paiement définit montant_du.</p><h4>Requête</h4><pre>{"etudiant": 1, "frais": 1, "montant_paye": 25000.00, "moyen_paiement": "cash", "justificatif": <file>}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/paiements/aggregated/</div><div class="endpoint-title">Récupérer des totaux agrégés</div></div></div>
+              <div class="endpoint-body"><p class="desc">Retourne des totaux et synthèses des paiements par étudiant/formation.</p><h4>Réponse</h4><pre>[{"etudiant_nom": "string", "formation_nom": "string", "total_du": 25000.00, "total_paye": 25000.00, "solde": 0.00}]</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="paie" class="section">
+          <div class="section-header"><h3>Paie</h3><span class="section-count">3 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/paie/paies/</div><div class="endpoint-title">Lister les paies</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les enregistrements de paie.</p><h4>Réponse</h4><pre>[{"id": 1, "beneficiaire_nom": "string", "salaire": 150000.00, "date": "2023-01-01", "statut": "Payé", "justificatif_url": "url"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/paie/paies/</div><div class="endpoint-title">Créer une paie</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute un nouvel enregistrement de paie. Auto-récupère salaire du bénéficiaire.</p><h4>Requête</h4><pre>{"beneficiaire_content_type": 1, "beneficiaire_object_id": 1, "date": "2023-01-01", "statut": "Payé", "justificatif": <file>}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/paie/content-types/</div><div class="endpoint-title">Lister les types de contenu</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les IDs des ContentType pour Personnel et Formateur.</p><h4>Réponse</h4><pre>{"personnel": 1, "formateur": 2}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="personnels" class="section">
+          <div class="section-header"><h3>Personnels</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/personnels/</div><div class="endpoint-title">Lister les personnels</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère la liste des personnels.</p><h4>Réponse</h4><pre>[{"id": 1, "nom": "string", "contact": "string", "fonction": "responsableRh", "date_inscription": "2023-01-01T00:00:00Z", "salaire": 150000.00}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/personnels/&lt;id&gt;/</div><div class="endpoint-title">Détails d’un personnel</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les informations d'un personnel.</p><h4>Réponse</h4><pre>{"id": 1, "nom": "string", "contact": "string", "fonction": "responsableRh", "date_inscription": "2023-01-01T00:00:00Z", "salaire": 150000.00}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="inventaires" class="section">
+          <div class="section-header"><h3>Inventaires</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/inventaires/</div><div class="endpoint-title">Lister les inventaires</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les éléments d'inventaire. Filtres: ?categorie=X&statut=X.</p><h4>Réponse</h4><pre>[{"id": 1, "reference": "INV-0001", "article": "Ordinateur", "categorie": "Informatique", "statut": "Disponible"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/inventaires/</div><div class="endpoint-title">Créer un inventaire</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute un nouvel élément d'inventaire. Supporte création en bulk via quantite.</p><h4>Requête</h4><pre>{"article": "Ordinateur", "categorie": "Informatique", "quantite": 5}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="depenses" class="section">
+          <div class="section-header"><h3>Dépenses</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/depenses/</div><div class="endpoint-title">Lister les dépenses</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère la liste des dépenses. Filtres: ?categorie=X&statut=X.</p><h4>Réponse</h4><pre>[{"id": 1, "libelle": "Achat matériel", "montant": 50000.00, "categorie": "Materiel", "date_depense": "2023-01-01", "responsable_nom": "string", "statut": "Validée"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/depenses/</div><div class="endpoint-title">Créer une dépense</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute une nouvelle dépense.</p><h4>Requête</h4><pre>{"libelle": "Achat matériel", "montant": 50000.00, "categorie": "Materiel", "responsable_content_type": 1, "responsable_object_id": 1, "justificatif": <file>}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="conges" class="section">
+          <div class="section-header"><h3>Congés</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/conges/</div><div class="endpoint-title">Lister les congés</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les demandes de congé.</p><h4>Réponse</h4><pre>[{"id": 1, "date_debut": "2023-01-01", "date_fin": "2023-01-05", "type_conge": "string", "raison": "string", "statut": "en_attente", "personnel": {...}}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/conges/</div><div class="endpoint-title">Créer une demande de congé</div></div></div>
+              <div class="endpoint-body"><p class="desc">Soumet une demande de congé.</p><h4>Requête</h4><pre>{"date_debut": "2023-01-01", "date_fin": "2023-01-05", "type_conge": "string", "raison": "string", "personnel_id": 1}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="demandes" class="section">
+          <div class="section-header"><h3>Demandes</h3><span class="section-count">3 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/demandes/</div><div class="endpoint-title">Lister les demandes</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère la liste des demandes.</p><h4>Réponse</h4><pre>[{"id": 1, "reference": "REQ-0001", "article": {...}, "date_demande": "2023-01-01", "statut": "En attente", "demandeur_nom": "string"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/demandes/</div><div class="endpoint-title">Créer une demande</div></div></div>
+              <div class="endpoint-body"><p class="desc">Envoie une nouvelle demande.</p><h4>Requête</h4><pre>{"article_id": 1, "demandeur_content_type": 1, "demandeur_object_id": 1}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/demandeurs/</div><div class="endpoint-title">Lister les demandeurs</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les informations des demandeurs (Formateurs + Personnels).</p><h4>Réponse</h4><pre>[{"id": 1, "nom": "string", "type": "Formateur"}, ...]</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="modules" class="section">
+          <div class="section-header"><h3>Modules</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/modules/</div><div class="endpoint-title">Lister les modules</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les modules disponibles.</p><h4>Réponse</h4><pre>[{"id": 1, "nom": "Mathématiques", "duree": 60, "coefficient": 2, "has_tp": false, "pourcentage_cc": 30, "pourcentage_sn": 70, "formateurs": [...], "formations": [...]}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/modules/</div><div class="endpoint-title">Créer un module</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute un nouveau module. Valide que CC+SN(+TP) = 100.</p><h4>Requête</h4><pre>{"nom": "Mathématiques", "duree": 60, "coefficient": 2, "has_tp": false, "pourcentage_cc": 30, "pourcentage_sn": 70}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="emplois-du-temps" class="section">
+          <div class="section-header"><h3>Emplois du temps</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/emploi-du-temps/</div><div class="endpoint-title">Lister les emplois du temps</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les emplois du temps. Filtres nombreux disponibles.</p><h4>Réponse</h4><pre>[{"id": 1, "formation_nom": "string", "niveau_nom": "string", "classe_nom": "string", "module_nom": "string", "formateur_nom": "string", "jour": "Lundi", "heure_debut": "08:00:00", "heure_fin": "10:00:00", "salle": "Salle 101"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/emploi-du-temps/</div><div class="endpoint-title">Créer un emploi du temps</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute un nouvel emploi du temps. Vérifications de conflits.</p><h4>Requête</h4><pre>{"formation_id": 1, "niveau_id": 1, "classe_id": 1, "module_id": 1, "formateur_id": 1, "jour": "Lundi", "heure_debut": "08:00:00", "heure_fin": "10:00:00", "salle": "Salle 101"}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="notes" class="section">
+          <div class="section-header"><h3>Notes</h3><span class="section-count">7 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/notes/</div><div class="endpoint-title">Lister les notes</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère la liste des notes. Filtres: ?classe=X&evaluation=X&summary=true.</p><h4>Réponse</h4><pre>[{"id": 1, "etudiant_nom": "string", "module_nom": "string", "note_cc": 15.00, "note_sn": 14.00, "note_finale": 14.50, "besoin_rattrapage": false}, ...]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/notes/</div><div class="endpoint-title">Créer une note</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute une nouvelle note. Calcule automatiquement note_finale.</p><h4>Requête</h4><pre>{"etudiant": 1, "module": 1, "session": "Semestre 1", "note_cc": 15.00, "note_sn": 14.00, "note_tp": null}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/notes/&lt;id&gt;/</div><div class="endpoint-title">Détails d’une note</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère une note spécifique.</p></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/notes/&lt;id&gt;/details/</div><div class="endpoint-title">Détails étendus</div></div></div>
+              <div class="endpoint-body"><p class="desc">Retourne les informations détaillées liées à une note.</p><h4>Réponse</h4><pre>{"id": 1, "etudiant": {...}, "module": {...}, "note_cc": 15.00, "note_sn": 14.00, "note_finale": 14.50, "besoin_rattrapage": false}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/notes/par-filiere-niveau/</div><div class="endpoint-title">Notes par formation et niveau</div></div></div>
+              <div class="endpoint-body"><p class="desc">Filtre les notes selon la formation et le niveau.</p><h4>Réponse</h4><pre>{"filiere": "string", "niveau": "string", "modules": [{"module": "string", "etudiants": [{"nom": "string", "notes": [...]}, ...]}, ...]}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/notes/par-filiere/</div><div class="endpoint-title">Notes par formation</div></div></div>
+              <div class="endpoint-body"><p class="desc">Filtre les notes par formation.</p><h4>Réponse</h4><pre>{"filiere": "string", "modules": [{"module": "string", "etudiants": [{"nom": "string", "notes": [...]}, ...]}, ...]}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/notes/par-module/</div><div class="endpoint-title">Notes par module</div></div></div>
+              <div class="endpoint-body"><p class="desc">Filtre les notes par module.</p><h4>Réponse</h4><pre>{"module": "string", "etudiants": [{"nom": "string", "notes": [...]}, ...]}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="assiduite" class="section">
+          <div class="section-header"><h3>Assiduité</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/assiduite/</div><div class="endpoint-title">Lister les présences</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les enregistrements d'assiduité. Filtres nombreux.</p><h4>Réponse</h4><pre>[{"id": 1, "etudiant_nom": "string", "module_nom": "string", "date": "2023-01-01", "type": "ABSENCE", "minutes_retard": null, "justifie": false}, ...]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/assiduite/</div><div class="endpoint-title">Créer une présence</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute un événement d'assiduité.</p><h4>Requête</h4><pre>{"etudiant": 1, "module": 1, "date": "2023-01-01", "type": "RETARD", "minutes_retard": 15, "justificatif": "string"}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="communication" class="section">
+          <div class="section-header"><h3>Communication</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/communication/</div><div class="endpoint-title">Lister les communications</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les messages ou notifications.</p><h4>Réponse</h4><pre>[{"id": 1, "titre": "string", "contenu": "string"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/communication/</div><div class="endpoint-title">Créer une communication</div></div></div>
+              <div class="endpoint-body"><p class="desc">Crée une nouvelle communication.</p><h4>Requête</h4><pre>{"titre": "string", "contenu": "string"}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="revenus" class="section">
+          <div class="section-header"><h3>Revenus</h3><span class="section-count">2 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/revenus/</div><div class="endpoint-title">Lister les revenus</div></div></div>
+              <div class="endpoint-body"><p class="desc">Récupère les revenus enregistrés. Filtres: ?categorie=X&statut=X.</p><h4>Réponse</h4><pre>[{"id": 1, "libelle": "Inscription", "montant": 25000.00, "categorie": "Inscription", "date_entree": "2023-01-01", "responsable": "string", "statut": "Validé"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/revenus/</div><div class="endpoint-title">Créer un revenu</div></div></div>
+              <div class="endpoint-body"><p class="desc">Ajoute une nouvelle entrée de revenu.</p><h4>Requête</h4><pre>{"libelle": "Inscription", "montant": 25000.00, "categorie": "Inscription", "responsable": "string", "justificatif": <file>}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="admin-api" class="section">
+          <div class="section-header"><h3>Admin API</h3><span class="section-count">5 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/admin-api/protected/</div><div class="endpoint-title">Point protégé</div></div></div>
+              <div class="endpoint-body"><p class="desc">Test d'accès authentifié.</p><h4>Réponse</h4><pre>{"message": "You are authenticated"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/admin-api/students/</div><div class="endpoint-title">Lister les étudiants</div></div></div>
+              <div class="endpoint-body"><p class="desc">Liste des étudiants gérés par l'admin.</p><h4>Réponse</h4><pre>[{"id": 1, "first_name": "string", "last_name": "string", "email": "string", "enrollment_date": "2023-01-01T00:00:00Z"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/admin-api/students/</div><div class="endpoint-title">Créer un étudiant</div></div></div>
+              <div class="endpoint-body"><p class="desc">Crée un étudiant administrativement.</p><h4>Requête</h4><pre>{"first_name": "string", "last_name": "string", "email": "string"}</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/admin-api/trainers/</div><div class="endpoint-title">Lister les formateurs</div></div></div>
+              <div class="endpoint-body"><p class="desc">Liste des formateurs du module admin.</p><h4>Réponse</h4><pre>[{"id": 1, "first_name": "string", "last_name": "string", "email": "string", "expertise": "string"}]</pre></div>
+            </article>
+            <article class="endpoint">
+              <div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/admin-api/trainers/</div><div class="endpoint-title">Créer un formateur</div></div></div>
+              <div class="endpoint-body"><p class="desc">Crée un formateur administratif.</p><h4>Requête</h4><pre>{"first_name": "string", "last_name": "string", "email": "string", "expertise": "string"}</pre></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="academique-v2" class="section">
+          <div class="section-header"><h3>Académique v2</h3><span class="section-count">18+ endpoints</span></div>
+          <p class="desc">API versionnée pour la hiérarchie académique, classes, inscriptions, évaluations, notes, frais, paiements et emplois du temps.</p>
+          <div class="endpoint-list">
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/facultes/</div><div class="endpoint-title">Lister les facultés</div></div></div><div class="endpoint-body"><p class="desc">Récupère les facultés.</p><h4>Réponse</h4><pre>[{"id": 1, "nom": "string", "code": "string"}]</pre></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/domaines/</div><div class="endpoint-title">Lister les domaines</div></div></div><div class="endpoint-body"><p class="desc">Récupère les domaines.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/filieres/</div><div class="endpoint-title">Lister les formations</div></div></div><div class="endpoint-body"><p class="desc">Récupère les formations.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/specialites/</div><div class="endpoint-title">Lister les spécialités</div></div></div><div class="endpoint-body"><p class="desc">Récupère les spécialités.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/cycles/</div><div class="endpoint-title">Lister les cycles</div></div></div><div class="endpoint-body"><p class="desc">Récupère les cycles académiques.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/annees-academiques/</div><div class="endpoint-title">Lister les années académiques</div></div></div><div class="endpoint-body"><p class="desc">Récupère les années académiques.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/classes/</div><div class="endpoint-title">Lister les classes</div></div></div><div class="endpoint-body"><p class="desc">Récupère les classes.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/semestres/</div><div class="endpoint-title">Lister les semestres</div></div></div><div class="endpoint-body"><p class="desc">Récupère les semestres.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/evaluations/</div><div class="endpoint-title">Lister les évaluations</div></div></div><div class="endpoint-body"><p class="desc">Récupère les évaluations académiques.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/affectations/</div><div class="endpoint-title">Lister les affectations</div></div></div><div class="endpoint-body"><p class="desc">Récupère les affectations pédagogique/administratives.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/inscriptions/</div><div class="endpoint-title">Lister les inscriptions</div></div></div><div class="endpoint-body"><p class="desc">Récupère les inscriptions académiques.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/notes/</div><div class="endpoint-title">Lister les notes</div></div></div><div class="endpoint-body"><p class="desc">Récupère les notes académiques.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/frais/</div><div class="endpoint-title">Lister les frais</div></div></div><div class="endpoint-body"><p class="desc">Récupère les frais et tarifs.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/paiements/</div><div class="endpoint-title">Lister les paiements académiques</div></div></div><div class="endpoint-body"><p class="desc">Récupère les paiements académiques.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/emplois-du-temps/</div><div class="endpoint-title">Lister les emplois du temps</div></div></div><div class="endpoint-body"><p class="desc">Récupère les emplois du temps par classe.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/v2/pre-inscriptions/</div><div class="endpoint-title">Créer une pré-inscription</div></div></div><div class="endpoint-body"><p class="desc">Soumet une pré-inscription.</p><h4>Requête</h4><pre>{"nom_candidat": "string", "prenom_candidat": "string", "email": "string", "telephone": "string", "filiere_souhaitee": 1, "bulletin": <file>}</pre></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/v2/pre-inscriptions/&lt;id&gt;/approve/</div><div class="endpoint-title">Approuver une pré-inscription</div></div></div><div class="endpoint-body"><p class="desc">Approuve une pré-inscription spécifique.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/facultes/&lt;id&gt;/domaines/</div><div class="endpoint-title">Domaines par faculté</div></div></div><div class="endpoint-body"><p class="desc">Récupère les domaines d’une faculté.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/domaines/&lt;id&gt;/filieres/</div><div class="endpoint-title">Formations par domaine</div></div></div><div class="endpoint-body"><p class="desc">Récupère les formations d’un domaine.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/filieres/&lt;id&gt;/specialites/</div><div class="endpoint-title">Spécialités par formation</div></div></div><div class="endpoint-body"><p class="desc">Récupère les spécialités d’une formation.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/notes/export-template/</div><div class="endpoint-title">Télécharger un template de notes</div></div></div><div class="endpoint-body"><p class="desc">Télécharge un modèle d’import de notes.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/notes/export-template-niveau/</div><div class="endpoint-title">Exporter un template par niveau</div></div></div><div class="endpoint-body"><p class="desc">Télécharge un modèle de notes spécifique à un niveau.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/v2/notes/import-notes/</div><div class="endpoint-title">Importer des notes</div></div></div><div class="endpoint-body"><p class="desc">Importe des notes à partir d’un payload ou d’un fichier.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method POST">POST</span><div><div class="endpoint-path">/api/v2/notes/import-notes-niveau/</div><div class="endpoint-title">Importer des notes par niveau</div></div></div><div class="endpoint-body"><p class="desc">Importe des notes pour un niveau académique donné.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/notes/par-filiere-niveau/</div><div class="endpoint-title">Notes par formation et niveau</div></div></div><div class="endpoint-body"><p class="desc">Filtre les notes selon la formation et le niveau.</p></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/v2/notes/par-module/</div><div class="endpoint-title">Notes par module</div></div></div><div class="endpoint-body"><p class="desc">Filtre les notes par module.</p></div></article>
+          </div>
+        </section>
+
+        <section id="openapi" class="section">
+          <div class="section-header"><h3>OpenAPI & Swagger</h3><span class="section-count">3 endpoints</span></div>
+          <div class="endpoint-list">
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/schema/</div><div class="endpoint-title">Schéma OpenAPI</div></div></div><div class="endpoint-body"><p class="desc">Retourne le schéma OpenAPI de l'API.</p><h4>Réponse</h4><pre>{"openapi": "3.0.0", "info": {...}, "paths": {...}, "components": {...}}</pre></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/docs/</div><div class="endpoint-title">Swagger UI</div></div></div><div class="endpoint-body"><p class="desc">Interface Swagger interactive pour explorer les endpoints.</p><h4>Réponse</h4><pre>HTML page with interactive API documentation</pre></div></article>
+            <article class="endpoint"><div class="endpoint-top"><span class="method GET">GET</span><div><div class="endpoint-path">/api/redoc/</div><div class="endpoint-title">Documentation Redoc</div></div></div><div class="endpoint-body"><p class="desc">Interface Redoc lisible pour l'API.</p><h4>Réponse</h4><pre>HTML page with readable API documentation</pre></div></article>
+          </div>
+        </section>
+      </div>
+      <div class="footer">Documentation mise à jour depuis l'analyse des routes backend de <code>smartback-new</code>.</div>
+    </main>
+  </div>
+</body>
+</html>
