@@ -2,25 +2,38 @@ from rest_framework import serializers
 
 from emploidutemps.models import EmploiDuTemps
 from etudiants.models import Inscription
-from formations.models import Niveau
 from modules.models import Module
 from notes.models import Note
 from paiements.models import Frais, Paiement
-from formations.models import Formation
 
 from .models import (
     Affectation,
     AnneeAcademique,
     Classe,
+    CourseAssignment,
     Cycle,
-    Domaine,
+    Departement,
     Evaluation,
-    Faculte,
     Filiere,
+    Niveau,
+    ParametresGlobaux,
     PreInscription,
     Semestre,
-    Specialite,
+    UniversiteTutelle,
 )
+
+
+class ParametresGlobauxSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ParametresGlobaux
+        fields = ["pourcentage_cc", "pourcentage_sn"]
+
+    def validate(self, attrs):
+        cc = attrs.get("pourcentage_cc", getattr(self.instance, "pourcentage_cc", 30))
+        sn = attrs.get("pourcentage_sn", getattr(self.instance, "pourcentage_sn", 70))
+        if cc + sn != 100:
+            raise serializers.ValidationError("La somme de CC et SN doit être exactement 100%.")
+        return attrs
 
 
 class CaseInsensitiveUniqueWithinParentMixin:
@@ -57,11 +70,11 @@ class CaseInsensitiveUniqueWithinParentMixin:
         return attrs
 
 
-class FaculteSerializer(serializers.ModelSerializer):
+class UniversiteTutelleSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="nom", read_only=True)
 
     class Meta:
-        model = Faculte
+        model = UniversiteTutelle
         fields = [
             "id",
             "nom",
@@ -73,28 +86,19 @@ class FaculteSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "updated_at", "name"]
 
-    def validate_nom(self, value):
-        value = value.strip()
-        qs = Faculte.objects.filter(nom__iexact=value)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError("Une faculté avec ce nom existe déjà.")
-        return value
 
-
-class DomaineSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelSerializer):
-    model_class = Domaine
-    parent_field = "faculte"
-    faculte_nom = serializers.CharField(source="faculte.nom", read_only=True)
+class DepartementSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelSerializer):
+    model_class = Departement
+    parent_field = "universite_tutelle"
+    universite_tutelle_nom = serializers.CharField(source="universite_tutelle.nom", read_only=True)
     name = serializers.CharField(source="nom", read_only=True)
 
     class Meta:
-        model = Domaine
+        model = Departement
         fields = [
             "id",
-            "faculte",
-            "faculte_nom",
+            "universite_tutelle",
+            "universite_tutelle_nom",
             "nom",
             "name",
             "code",
@@ -102,7 +106,7 @@ class DomaineSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.Mode
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "faculte_nom", "name"]
+        read_only_fields = ["id", "created_at", "updated_at", "universite_tutelle_nom", "name"]
 
     def validate(self, attrs):
         return self.validate_scoped_name(attrs)
@@ -110,21 +114,18 @@ class DomaineSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.Mode
 
 class FiliereSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelSerializer):
     model_class = Filiere
-    parent_field = "domaine"
-    domaine_nom = serializers.CharField(source="domaine.nom", read_only=True)
-    faculte_nom = serializers.CharField(source="domaine.faculte.nom", read_only=True)
-    formation_nom = serializers.CharField(source="formation.intitule", read_only=True)
+    parent_field = "departement"
+    departement_nom = serializers.CharField(source="departement.nom", read_only=True)
+    universite_tutelle_nom = serializers.CharField(source="departement.universite_tutelle.nom", read_only=True)
     name = serializers.CharField(source="nom", read_only=True)
 
     class Meta:
         model = Filiere
         fields = [
             "id",
-            "domaine",
-            "domaine_nom",
-            "faculte_nom",
-            "formation",
-            "formation_nom",
+            "departement",
+            "departement_nom",
+            "universite_tutelle_nom",
             "nom",
             "name",
             "code",
@@ -136,43 +137,8 @@ class FiliereSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.Mode
             "id",
             "created_at",
             "updated_at",
-            "domaine_nom",
-            "faculte_nom",
-            "formation_nom",
-            "name",
-        ]
-
-    def validate(self, attrs):
-        return self.validate_scoped_name(attrs)
-
-
-class SpecialiteSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelSerializer):
-    model_class = Specialite
-    parent_field = "filiere"
-    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
-    domaine_nom = serializers.CharField(source="filiere.domaine.nom", read_only=True)
-    name = serializers.CharField(source="nom", read_only=True)
-
-    class Meta:
-        model = Specialite
-        fields = [
-            "id",
-            "filiere",
-            "filiere_nom",
-            "domaine_nom",
-            "nom",
-            "name",
-            "code",
-            "description",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = [
-            "id",
-            "created_at",
-            "updated_at",
-            "filiere_nom",
-            "domaine_nom",
+            "departement_nom",
+            "universite_tutelle_nom",
             "name",
         ]
 
@@ -182,9 +148,9 @@ class SpecialiteSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.M
 
 class CycleSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelSerializer):
     model_class = Cycle
-    parent_field = "specialite"
-    specialite_nom = serializers.CharField(source="specialite.nom", read_only=True)
-    filiere_nom = serializers.CharField(source="specialite.filiere.nom", read_only=True)
+    parent_field = "filiere"
+    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
+    departement_nom = serializers.CharField(source="filiere.departement.nom", read_only=True)
     levels_count = serializers.SerializerMethodField()
     name = serializers.CharField(source="nom", read_only=True)
 
@@ -192,9 +158,9 @@ class CycleSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelS
         model = Cycle
         fields = [
             "id",
-            "specialite",
-            "specialite_nom",
+            "filiere",
             "filiere_nom",
+            "departement_nom",
             "nom",
             "name",
             "code",
@@ -208,8 +174,8 @@ class CycleSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelS
             "id",
             "created_at",
             "updated_at",
-            "specialite_nom",
             "filiere_nom",
+            "departement_nom",
             "levels_count",
             "name",
         ]
@@ -221,27 +187,26 @@ class CycleSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelS
         return obj.niveaux.count()
 
 
-class LevelSerializer(serializers.ModelSerializer):
+class LevelSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelSerializer):
+    model_class = Niveau
+    parent_field = "cycle"
     cycle_nom = serializers.CharField(source="cycle.nom", read_only=True)
-    specialite_id = serializers.IntegerField(source="cycle.specialite_id", read_only=True)
-    specialite_nom = serializers.CharField(source="cycle.specialite.nom", read_only=True)
-    filiere_id = serializers.IntegerField(source="formation_id", read_only=True)
-    filiere_nom = serializers.CharField(source="formation.intitule", read_only=True)
+    filiere_id = serializers.IntegerField(source="cycle.filiere_id", read_only=True)
+    filiere_nom = serializers.CharField(source="cycle.filiere.nom", read_only=True)
     name = serializers.CharField(source="nom", read_only=True)
 
     class Meta:
         model = Niveau
         fields = [
             "id",
-            "formation",
             "filiere_id",
             "filiere_nom",
             "cycle",
             "cycle_nom",
-            "specialite_id",
-            "specialite_nom",
             "nom",
             "name",
+            "code",
+            "ordre",
             "modules",
         ]
         read_only_fields = [
@@ -249,40 +214,20 @@ class LevelSerializer(serializers.ModelSerializer):
             "filiere_id",
             "filiere_nom",
             "cycle_nom",
-            "specialite_id",
-            "specialite_nom",
             "name",
         ]
 
-    def validate_nom(self, value):
-        return value.strip()
-
     def validate(self, attrs):
-        formation = attrs.get("formation") or getattr(self.instance, "formation", None)
-        cycle = attrs.get("cycle") or getattr(self.instance, "cycle", None)
-        nom = attrs.get("nom") or getattr(self.instance, "nom", None)
-
-        if formation and cycle:
-            filiere = getattr(cycle.specialite, "filiere", None)
-            if filiere and filiere.formation_id and filiere.formation_id != formation.id:
-                raise serializers.ValidationError({
-                    "formation": "Le niveau doit utiliser la formation liée à la filière de cette spécialité.",
-                })
-
-        queryset = Niveau.objects.filter(formation=formation, nom__iexact=nom.strip())
-        if self.instance:
-            queryset = queryset.exclude(pk=self.instance.pk)
-        if formation and nom and queryset.exists():
-            raise serializers.ValidationError({
-                "nom": "Un niveau avec ce nom existe déjà dans cette filière.",
-            })
-        return attrs
+        return self.validate_scoped_name(attrs)
 
 
 class CourseSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="nom", read_only=True)
-    formation = serializers.PrimaryKeyRelatedField(queryset=Formation.objects.all(), write_only=True, required=False)
-    formations = serializers.SerializerMethodField()
+    filiere = serializers.PrimaryKeyRelatedField(queryset=Filiere.objects.all(), write_only=True, required=False)
+    cycle = serializers.PrimaryKeyRelatedField(queryset=Cycle.objects.all(), write_only=True, required=False)
+    niveau = serializers.PrimaryKeyRelatedField(queryset=Niveau.objects.all(), write_only=True, required=False)
+    classe = serializers.PrimaryKeyRelatedField(queryset=Classe.objects.all(), write_only=True, required=False)
+    attributions = serializers.SerializerMethodField()
 
     class Meta:
         model = Module
@@ -297,58 +242,96 @@ class CourseSerializer(serializers.ModelSerializer):
             "pourcentage_sn",
             "pourcentage_tp",
             "semestre",
-            "formation",
-            "formations",
+            "filiere",
+            "cycle",
+            "niveau",
+            "classe",
+            "attributions",
         ]
         read_only_fields = ["id", "name"]
 
-    def validate_nom(self, value):
-        value = value.strip()
-        qs = Module.objects.filter(nom__iexact=value)
-        if self.instance:
-            qs = qs.exclude(pk=self.instance.pk)
-        if qs.exists():
-            raise serializers.ValidationError("Un cours avec ce nom existe déjà.")
-        return value
-
-    def get_formations(self, obj):
+    def get_attributions(self, obj):
         return [
             {
-                "id": formation.id,
-                "intitule": formation.intitule,
+                "id": attribution.id,
+                "filiere_id": attribution.filiere_id,
+                "filiere_nom": attribution.filiere.nom,
+                "cycle_id": attribution.cycle_id,
+                "cycle_nom": attribution.cycle.nom,
+                "niveau_id": attribution.niveau_id,
+                "niveau_nom": attribution.niveau.nom,
             }
-            for formation in obj.formations.all()
+            for attribution in obj.course_assignments.select_related("filiere", "cycle", "niveau").all()
         ]
 
     def create(self, validated_data):
-        formation = validated_data.pop("formation", None)
+        filiere = validated_data.pop("filiere", None)
+        cycle = validated_data.pop("cycle", None)
+        niveau = validated_data.pop("niveau", None)
+        classe = validated_data.pop("classe", None)
         module = Module.objects.create(**validated_data)
-        if formation is not None:
-            formation.modules.add(module)
+        self._sync_assignment(module, filiere, cycle, niveau, classe)
         return module
 
     def update(self, instance, validated_data):
-        formation = validated_data.pop("formation", None)
+        filiere = validated_data.pop("filiere", serializers.empty)
+        cycle = validated_data.pop("cycle", serializers.empty)
+        niveau = validated_data.pop("niveau", serializers.empty)
+        classe = validated_data.pop("classe", serializers.empty)
         module = super().update(instance, validated_data)
-        if formation is not None:
-            formation.modules.add(module)
+        if filiere is not serializers.empty or cycle is not serializers.empty or niveau is not serializers.empty or classe is not serializers.empty:
+            self._sync_assignment(
+                module,
+                None if filiere is serializers.empty else filiere,
+                None if cycle is serializers.empty else cycle,
+                None if niveau is serializers.empty else niveau,
+                None if classe is serializers.empty else classe,
+                replace=True,
+            )
         return module
+
+    def _sync_assignment(self, module, filiere, cycle, niveau, classe=None, replace=False):
+        if replace:
+            module.course_assignments.all().delete()
+            # Also clear from Classe if we want strict one-to-one or handle M2M
+            if classe:
+                classe.modules.add(module)
+        
+        if not all([filiere, cycle, niveau]):
+            # If only classe is provided, we can try to infer others
+            if classe:
+                filiere = filiere or classe.filiere
+                cycle = cycle or classe.cycle
+                niveau = niveau or classe.niveau
+                classe.modules.add(module)
+            else:
+                return
+                
+        CourseAssignment.objects.get_or_create(
+            module=module,
+            filiere=filiere,
+            cycle=cycle,
+            niveau=niveau,
+        )
 
     def validate(self, attrs):
         has_tp = attrs.get("has_tp", getattr(self.instance, "has_tp", False))
+        filiere = attrs.get("filiere")
+        cycle = attrs.get("cycle")
+        niveau = attrs.get("niveau")
         pourcentage_cc = attrs.get("pourcentage_cc", getattr(self.instance, "pourcentage_cc", 0)) or 0
         pourcentage_sn = attrs.get("pourcentage_sn", getattr(self.instance, "pourcentage_sn", 0)) or 0
         pourcentage_tp = attrs.get("pourcentage_tp", getattr(self.instance, "pourcentage_tp", 0)) or 0
 
         total = pourcentage_cc + pourcentage_sn + (pourcentage_tp if has_tp else 0)
         if total != 100:
-            raise serializers.ValidationError(
-                "La somme des pourcentages doit être égale à 100."
-            )
-        if not has_tp and pourcentage_tp:
-            raise serializers.ValidationError({
-                "pourcentage_tp": "Le pourcentage TP doit être à 0 quand has_tp est faux.",
-            })
+            raise serializers.ValidationError("La somme des pourcentages doit être égale à 100.")
+        
+        if filiere and cycle and cycle.filiere_id != filiere.id:
+            raise serializers.ValidationError({"cycle": "Le cycle doit appartenir à la filière sélectionnée."})
+        if cycle and niveau and niveau.cycle_id != cycle.id:
+            raise serializers.ValidationError({"niveau": "Le niveau doit appartenir au cycle sélectionné."})
+        
         return attrs
 
 
@@ -370,41 +353,20 @@ class AnneeAcademiqueSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "updated_at", "name"]
 
-    def validate(self, attrs):
-        date_debut = attrs.get("date_debut", getattr(self.instance, "date_debut", None))
-        date_fin = attrs.get("date_fin", getattr(self.instance, "date_fin", None))
-        est_active = attrs.get("est_active", getattr(self.instance, "est_active", False))
-
-        if date_debut and date_fin and date_debut >= date_fin:
-            raise serializers.ValidationError({
-                "date_fin": "La date de fin doit être postérieure à la date de début.",
-            })
-
-        if est_active:
-            qs = AnneeAcademique.objects.filter(est_active=True)
-            if self.instance:
-                qs = qs.exclude(pk=self.instance.pk)
-            if qs.exists():
-                raise serializers.ValidationError({
-                    "est_active": "Une seule année académique peut être active à la fois.",
-                })
-        return attrs
-
 
 class ClasseSerializer(serializers.ModelSerializer):
-    specialite_nom = serializers.CharField(source="specialite.nom", read_only=True)
+    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
     cycle_nom = serializers.CharField(source="cycle.nom", read_only=True)
     niveau_nom = serializers.CharField(source="niveau.nom", read_only=True)
     annee_academique_libelle = serializers.CharField(source="annee_academique.libelle", read_only=True)
-    modules_details = CourseSerializer(source="modules", many=True, read_only=True)
     name = serializers.CharField(source="nom", read_only=True)
 
     class Meta:
         model = Classe
         fields = [
             "id",
-            "specialite",
-            "specialite_nom",
+            "filiere",
+            "filiere_nom",
             "cycle",
             "cycle_nom",
             "niveau",
@@ -415,7 +377,6 @@ class ClasseSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "modules",
-            "modules_details",
             "created_at",
             "updated_at",
         ]
@@ -425,39 +386,11 @@ class ClasseSerializer(serializers.ModelSerializer):
             "name",
             "created_at",
             "updated_at",
-            "specialite_nom",
+            "filiere_nom",
             "cycle_nom",
             "niveau_nom",
             "annee_academique_libelle",
-            "modules_details",
         ]
-
-    def validate(self, attrs):
-        specialite = attrs.get("specialite") or getattr(self.instance, "specialite", None)
-        cycle = attrs.get("cycle") or getattr(self.instance, "cycle", None)
-        niveau = attrs.get("niveau") or getattr(self.instance, "niveau", None)
-        modules = attrs.get("modules")
-
-        if cycle and specialite and cycle.specialite_id != specialite.id:
-            raise serializers.ValidationError({
-                "cycle": "Le cycle doit appartenir à la spécialité sélectionnée.",
-            })
-
-        if niveau and cycle and niveau.cycle_id and niveau.cycle_id != cycle.id:
-            raise serializers.ValidationError({
-                "niveau": "Le niveau doit appartenir au cycle sélectionné.",
-            })
-
-        if modules and niveau:
-            allowed_module_ids = set(niveau.modules.values_list("id", flat=True))
-            if not allowed_module_ids:
-                allowed_module_ids = set(niveau.formation.modules.values_list("id", flat=True))
-            invalid_ids = [module.id for module in modules if module.id not in allowed_module_ids]
-            if invalid_ids:
-                raise serializers.ValidationError({
-                    "modules": f"Les modules {invalid_ids} ne sont pas autorisés pour ce niveau.",
-                })
-        return attrs
 
 
 class SemestreSerializer(serializers.ModelSerializer):
@@ -517,22 +450,6 @@ class EvaluationSerializer(serializers.ModelSerializer):
             "name",
         ]
 
-    def validate(self, attrs):
-        classe = attrs.get("classe") or getattr(self.instance, "classe", None)
-        module = attrs.get("module") or getattr(self.instance, "module", None)
-        semestre = attrs.get("semestre") or getattr(self.instance, "semestre", None)
-
-        if classe and module and not classe.modules.filter(pk=module.pk).exists():
-            raise serializers.ValidationError({
-                "module": "Le module doit déjà être rattaché à la classe.",
-            })
-
-        if semestre and classe and semestre.annee_academique_id != classe.annee_academique_id:
-            raise serializers.ValidationError({
-                "semestre": "Le semestre doit appartenir à la même année académique que la classe.",
-            })
-        return attrs
-
 
 class AffectationSerializer(serializers.ModelSerializer):
     enseignant_nom = serializers.CharField(source="enseignant.nom", read_only=True)
@@ -554,21 +471,13 @@ class AffectationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at", "updated_at", "enseignant_nom", "module_nom", "classe_nom"]
 
-    def validate(self, attrs):
-        classe = attrs.get("classe") or getattr(self.instance, "classe", None)
-        module = attrs.get("module") or getattr(self.instance, "module", None)
-        if classe and module and not classe.modules.filter(pk=module.pk).exists():
-            raise serializers.ValidationError({
-                "module": "Le module affecté doit appartenir à la classe.",
-            })
-        return attrs
-
 
 class AcademicInscriptionSerializer(serializers.ModelSerializer):
     etudiant_nom = serializers.CharField(source="etudiant.nom", read_only=True)
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     annee_academique_libelle = serializers.CharField(source="annee_academique_ref.libelle", read_only=True)
     niveau_nom = serializers.CharField(source="niveau.nom", read_only=True)
+    filiere_nom = serializers.CharField(source="niveau.cycle.filiere.nom", read_only=True)
 
     class Meta:
         model = Inscription
@@ -580,6 +489,7 @@ class AcademicInscriptionSerializer(serializers.ModelSerializer):
             "classe_nom",
             "niveau",
             "niveau_nom",
+            "filiere_nom",
             "annee_academique",
             "annee_academique_ref",
             "annee_academique_libelle",
@@ -592,14 +502,10 @@ class AcademicNoteSerializer(serializers.ModelSerializer):
     evaluation_nom = serializers.CharField(source="evaluation.libelle", read_only=True)
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     module_nom = serializers.CharField(source="module.nom", read_only=True)
-    module_semestre = serializers.CharField(source="module.semestre", read_only=True)
 
     class Meta:
         model = Note
         fields = "__all__"
-        extra_kwargs = {
-            "session": {"required": False},
-        }
 
 
 class FraisSerializer(serializers.ModelSerializer):
@@ -632,23 +538,9 @@ class AcademicEmploiDuTempsSerializer(serializers.ModelSerializer):
 
 class PreInscriptionSerializer(serializers.ModelSerializer):
     filiere_souhaitee_nom = serializers.CharField(source="filiere_souhaitee.nom", read_only=True)
-    formation_souhaitee_nom = serializers.CharField(source="formation_souhaitee.intitule", read_only=True)
+    cycle_souhaite_nom = serializers.CharField(source="cycle_souhaite.nom", read_only=True)
     niveau_souhaite_nom = serializers.CharField(source="niveau_souhaite.nom", read_only=True)
     name = serializers.CharField(read_only=True)
-    montant_inscription_verse = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        write_only=True,
-        required=False,
-        min_value=0,
-    )
-    montant_formation_verse = serializers.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        write_only=True,
-        required=False,
-        min_value=0,
-    )
 
     class Meta:
         model = PreInscription
@@ -661,14 +553,12 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "email",
             "telephone",
             "filiere_souhaitee",
-            "formation_souhaitee",
             "filiere_souhaitee_nom",
-            "formation_souhaitee_nom",
+            "cycle_souhaite",
+            "cycle_souhaite_nom",
             "niveau_souhaite",
             "niveau_souhaite_nom",
             "statut",
-            "montant_inscription_verse",
-            "montant_formation_verse",
             "bulletin",
             "message",
             "created_at",
@@ -680,28 +570,6 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "filiere_souhaitee_nom",
-            "formation_souhaitee_nom",
+            "cycle_souhaite_nom",
             "niveau_souhaite_nom",
         ]
-
-    def validate(self, attrs):
-        filiere = attrs.get("filiere_souhaitee") or getattr(self.instance, "filiere_souhaitee", None)
-        formation = attrs.get("formation_souhaitee") or getattr(self.instance, "formation_souhaitee", None)
-        niveau = attrs.get("niveau_souhaite") or getattr(self.instance, "niveau_souhaite", None)
-
-        if filiere and formation and filiere.formation_id != formation.id:
-            raise serializers.ValidationError({
-                "formation_souhaitee": "La formation souhaitée doit correspondre à la filière choisie.",
-            })
-
-        if niveau and formation and niveau.formation_id != formation.id:
-            raise serializers.ValidationError({
-                "niveau_souhaite": "Le niveau souhaité n'appartient pas à la formation choisie.",
-            })
-
-        if filiere and niveau and filiere.formation_id and niveau.formation_id != filiere.formation_id:
-            raise serializers.ValidationError({
-                "niveau_souhaite": "Le niveau souhaité n'appartient pas à la filière choisie.",
-            })
-
-        return attrs

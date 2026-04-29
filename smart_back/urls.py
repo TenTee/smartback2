@@ -44,7 +44,6 @@ urlpatterns = [
 
     # Apps
     path('api/auth/', include('users.urls')),
-    path("api/", include("formations.urls")), 
     path("api/v2/", include("academique.urls")),
     path('api/files/', include('files.urls')),
     path('api/admin-api/', include('admin_api.urls')),

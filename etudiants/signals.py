@@ -1,29 +1,31 @@
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from .models import Etudiant
+from .models import Etudiant, Inscription
 from notes.models import Note
 
-@receiver(post_save, sender=Etudiant)
-def create_or_update_notes(sender, instance, created, **kwargs):
+@receiver(post_save, sender=Inscription)
+def create_or_update_notes_on_inscription(sender, instance, created, **kwargs):
     """
-    ✅ Lorsqu'un étudiant est ajouté ou modifié :
-    - Création automatique de ses notes vides en Semestre 1
-    - Mise à jour si besoin (ajout/suppression selon la filière)
+    ✅ Lorsqu'une inscription est ajoutée ou modifiée :
+    - Génération des notes basées sur les modules de la CLASSE
     """
-    if instance.statut == 'Pré-inscrit':
-        # Ne pas générer de notes tant que l'inscription n'est pas validée
+    if not instance.classe:
         return
 
-    current_modules = set(instance.filiere.modules.all())
-    existing_notes = Note.objects.filter(etudiant=instance, session="Semestre 1")
+    # Modules de la classe
+    current_modules = set(instance.classe.modules.all())
+    
+    # Sessions à initialiser (on pourrait boucler sur les semestres si besoin)
+    sessions = ["Semestre 1", "Semestre 2"] # Exemple simplifié
 
-    if created:
-        # Créer une note vide pour chaque module de sa filière
+    for session in sessions:
+        # Création des notes manquantes
         for module in current_modules:
             Note.objects.get_or_create(
-                etudiant=instance,
+                etudiant=instance.etudiant,
                 module=module,
-                session="Semestre 1",
+                classe=instance.classe, # Important: on lie à la classe
+                session=session,
                 defaults={
                     "note_cc": None,
                     "note_sn": None,
@@ -31,19 +33,9 @@ def create_or_update_notes(sender, instance, created, **kwargs):
                     "note_finale": None,
                 }
             )
-    else:
-        # Supprimer les notes des modules qui ne sont plus dans la filière
-        for note in existing_notes:
-            if note.module not in current_modules:
-                note.delete()
 
-        # Créer les notes manquantes pour les nouveaux modules
-        for module in current_modules:
-            Note.objects.get_or_create(
-                etudiant=instance,
-                module=module,
-                session="Semestre 1"
-            )
+    # Nettoyage facultatif : supprimer les notes si l'étudiant change de classe/modules ?
+    # Pour l'instant on se concentre sur la création.
 
 @receiver(post_delete, sender=Etudiant)
 def delete_notes(sender, instance, **kwargs):

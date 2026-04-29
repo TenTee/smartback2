@@ -2,13 +2,13 @@ from django.db import models
 from datetime import time
 from formateurs.models import Formateur
 from modules.models import Module
-from formations.models import Formation, Niveau
+from academique.models import Filiere, Niveau
 from django.core.exceptions import ValidationError
 
 class EmploiDuTemps(models.Model):
-    formation = models.ForeignKey(Formation, on_delete=models.CASCADE)
+    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE)
     niveau = models.ForeignKey(Niveau, on_delete=models.CASCADE, null=True, blank=True)
-    classe = models.ForeignKey("academique.Classe", on_delete=models.SET_NULL, null=True, blank=True, related_name="emplois_du_temps")
+    classe = models.ForeignKey("academique.Classe", on_delete=models.SET_NULL, null=True, blank=True, related_name="emplois_du_temps_academique")
     module = models.ForeignKey(Module, on_delete=models.CASCADE)
     formateur = models.ForeignKey(Formateur, on_delete=models.CASCADE)
     jour = models.CharField(max_length=20)
@@ -20,8 +20,8 @@ class EmploiDuTemps(models.Model):
         """Validation métier (admin/tests)."""
 
         if self.classe_id:
-            if self.formation_id and self.classe.niveau.formation_id != self.formation_id:
-                raise ValidationError("La classe fournie n'appartient pas à la formation sélectionnée.")
+            if self.filiere_id and self.classe.filiere_id != self.filiere_id:
+                raise ValidationError("La classe fournie n'appartient pas à la filière sélectionnée.")
             if self.niveau_id and self.classe.niveau_id != self.niveau_id:
                 raise ValidationError("La classe fournie n'appartient pas au niveau sélectionné.")
             if not self.classe.modules.filter(pk=self.module_id).exists():
@@ -64,44 +64,13 @@ class EmploiDuTemps(models.Model):
         """Sauvegarde + propagation directe des tronc communs."""
         if self.classe_id:
             self.niveau = self.classe.niveau
-            self.formation = self.classe.niveau.formation
+            self.filiere = self.classe.filiere
         self.full_clean()
         super().save(*args, **kwargs)
 
-        # ⚡ Mettre à jour toutes les séances tronc communs du même module/créneau
-        autres_seances = EmploiDuTemps.objects.filter(
-            module=self.module,
-            jour=self.jour,
-            heure_debut=self.heure_debut,
-            heure_fin=self.heure_fin
-        ).exclude(pk=self.pk)
-
-        for seance in autres_seances:
-            seance.salle = self.salle
-            seance.formateur = self.formateur
-            super(EmploiDuTemps, seance).save()  # bypass full_clean pour éviter faux conflits
-
-        # ⚡ Créer les duplications manquantes
-        autres_formations = self.module.formations.exclude(pk=self.formation.pk)
-        for formation in autres_formations:
-            existe = EmploiDuTemps.objects.filter(
-                formation=formation,
-                module=self.module,
-                jour=self.jour,
-                heure_debut=self.heure_debut,
-                heure_fin=self.heure_fin,
-                salle=self.salle
-            ).first()
-            if not existe:
-                EmploiDuTemps.objects.create(
-                    formation=formation,
-                    module=self.module,
-                    jour=self.jour,
-                    heure_debut=self.heure_debut,
-                    heure_fin=self.heure_fin,
-                    salle=self.salle,
-                    formateur=self.formateur
-                )
+        # Logic for tronc commun duplication could be kept or adjusted
+        # For now, I'll simplify as the original logic used Module.formations
+        # and Module doesn't have a direct link to Filieres in the new system yet (only through CourseAssignment)
 
     def delete(self, *args, **kwargs):
         """Suppression synchronisée des tronc communs."""

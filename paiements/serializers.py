@@ -1,32 +1,31 @@
 from decimal import Decimal
-
 from rest_framework import serializers
 
 from .models import (
-    FormationInstallmentTemplate,
-    FormationPaymentPolicy,
+    FiliereInstallmentTemplate,
+    FilierePaymentPolicy,
     Paiement,
     StudentPaymentInstallment,
     StudentPaymentPlan,
 )
 
 
-class FormationInstallmentTemplateSerializer(serializers.ModelSerializer):
+class FiliereInstallmentTemplateSerializer(serializers.ModelSerializer):
     class Meta:
-        model = FormationInstallmentTemplate
+        model = FiliereInstallmentTemplate
         fields = ["id", "order", "label", "due_date", "amount_due"]
 
 
-class FormationPaymentPolicySerializer(serializers.ModelSerializer):
-    four_installments = FormationInstallmentTemplateSerializer(many=True, required=False)
-    formation_nom = serializers.CharField(source="formation.intitule", read_only=True)
+class FilierePaymentPolicySerializer(serializers.ModelSerializer):
+    four_installments = FiliereInstallmentTemplateSerializer(many=True, required=False)
+    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
 
     class Meta:
-        model = FormationPaymentPolicy
+        model = FilierePaymentPolicy
         fields = [
             "id",
-            "formation",
-            "formation_nom",
+            "filiere",
+            "filiere_nom",
             "four_installments_enabled",
             "monthly_enabled",
             "monthly_start_date",
@@ -36,11 +35,11 @@ class FormationPaymentPolicySerializer(serializers.ModelSerializer):
             "four_installments",
             "updated_at",
         ]
-        read_only_fields = ["updated_at", "formation_nom"]
+        read_only_fields = ["updated_at", "filiere_nom"]
 
     def validate(self, attrs):
         four_installments = attrs.get("four_installments", self.initial_data.get("four_installments"))
-        formation = attrs.get("formation") or getattr(self.instance, "formation", None)
+        filiere = attrs.get("filiere") or getattr(self.instance, "filiere", None)
         four_enabled = attrs.get("four_installments_enabled", getattr(self.instance, "four_installments_enabled", False))
         monthly_enabled = attrs.get("monthly_enabled", getattr(self.instance, "monthly_enabled", False))
 
@@ -50,21 +49,14 @@ class FormationPaymentPolicySerializer(serializers.ModelSerializer):
         if four_enabled:
             entries = four_installments if four_installments is not None else []
             if self.instance and four_installments is None:
-                entries = FormationInstallmentTemplateSerializer(self.instance.four_installments.all(), many=True).data
+                entries = FiliereInstallmentTemplateSerializer(self.instance.four_installments.all(), many=True).data
             if len(entries) != 4:
                 raise serializers.ValidationError({"four_installments": "Vous devez renseigner exactement 4 tranches."})
-            total = sum(Decimal(str(item.get("amount_due", 0))) for item in entries)
-            formation_amount = Decimal(getattr(formation, "montant", 0) or 0)
-            if total != formation_amount:
-                raise serializers.ValidationError({
-                    "four_installments": f"La somme des 4 tranches doit etre egale au montant de la formation ({formation_amount})."
-                })
-
         return attrs
 
     def create(self, validated_data):
         installments_data = validated_data.pop("four_installments", [])
-        policy = FormationPaymentPolicy.objects.create(**validated_data)
+        policy = FilierePaymentPolicy.objects.create(**validated_data)
         self._save_installments(policy, installments_data)
         return policy
 
@@ -80,7 +72,7 @@ class FormationPaymentPolicySerializer(serializers.ModelSerializer):
         templates = []
         for item in installments_data:
             templates.append(
-                FormationInstallmentTemplate(
+                FiliereInstallmentTemplate(
                     policy=policy,
                     order=item["order"],
                     label=item.get("label", ""),
@@ -88,7 +80,7 @@ class FormationPaymentPolicySerializer(serializers.ModelSerializer):
                     amount_due=item["amount_due"],
                 )
             )
-        FormationInstallmentTemplate.objects.bulk_create(templates)
+        FiliereInstallmentTemplate.objects.bulk_create(templates)
 
 
 class StudentPaymentInstallmentSerializer(serializers.ModelSerializer):
@@ -111,10 +103,8 @@ class StudentPaymentInstallmentSerializer(serializers.ModelSerializer):
 
 class StudentPaymentPlanSerializer(serializers.ModelSerializer):
     installments = StudentPaymentInstallmentSerializer(many=True, read_only=True)
-    formation_nom = serializers.CharField(source="formation.intitule", read_only=True)
+    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
     etudiant_nom = serializers.CharField(source="etudiant.nom", read_only=True)
-    overdue_count = serializers.SerializerMethodField()
-    alert_count = serializers.SerializerMethodField()
 
     class Meta:
         model = StudentPaymentPlan
@@ -122,8 +112,8 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
             "id",
             "etudiant",
             "etudiant_nom",
-            "formation",
-            "formation_nom",
+            "filiere",
+            "filiere_nom",
             "policy",
             "mode",
             "total_amount",
@@ -132,38 +122,27 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
             "alert_days_before",
             "status",
             "installments",
-            "overdue_count",
-            "alert_count",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at", "etudiant_nom", "formation_nom", "installments", "overdue_count", "alert_count"]
+        read_only_fields = ["created_at", "updated_at", "etudiant_nom", "filiere_nom", "installments"]
 
     def validate(self, attrs):
         etudiant = attrs.get("etudiant") or getattr(self.instance, "etudiant", None)
-        formation = attrs.get("formation") or getattr(self.instance, "formation", None) or getattr(etudiant, "filiere", None)
+        filiere = attrs.get("filiere") or getattr(self.instance, "filiere", None) or (etudiant.filiere if etudiant else None)
         mode = attrs.get("mode", getattr(self.instance, "mode", None))
 
-        if etudiant and not formation:
-            formation = etudiant.filiere
-            attrs["formation"] = formation
-        if not formation:
-            raise serializers.ValidationError({"formation": "La formation est requise."})
+        if etudiant and not filiere:
+            filiere = etudiant.filiere
+            attrs["filiere"] = filiere
+        if not filiere:
+            raise serializers.ValidationError({"filiere": "La filière est requise."})
 
-        policy = attrs.get("policy") or getattr(self.instance, "policy", None) or getattr(formation, "payment_policy", None)
+        policy = attrs.get("policy") or getattr(self.instance, "policy", None) or getattr(filiere, "payment_policy", None)
         if not policy:
-            raise serializers.ValidationError({"policy": "Aucune politique d'echeancier n'est configuree pour cette formation."})
+            raise serializers.ValidationError({"policy": "Aucune politique d'echeancier n'est configuree pour cette filière."})
         attrs["policy"] = policy
 
-        if mode == FormationPaymentPolicy.MODE_FOUR_INSTALLMENTS and not policy.four_installments_enabled:
-            raise serializers.ValidationError({"mode": "Le mode 04 tranches n'est pas disponible pour cette formation."})
-        if mode == FormationPaymentPolicy.MODE_MONTHLY and not policy.monthly_enabled:
-            raise serializers.ValidationError({"mode": "Le mode mensuel n'est pas disponible pour cette formation."})
-
-        if "total_amount" not in attrs:
-            attrs["total_amount"] = formation.montant
-        if "alert_days_before" not in attrs:
-            attrs["alert_days_before"] = policy.alert_days_before
         return attrs
 
     def create(self, validated_data):
@@ -171,26 +150,10 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
         plan.generate_installments()
         return plan
 
-    def update(self, instance, validated_data):
-        regenerate = any(
-            field in validated_data
-            for field in ["mode", "total_amount", "monthly_start_date", "monthly_due_day", "policy"]
-        )
-        plan = super().update(instance, validated_data)
-        if regenerate:
-            plan.generate_installments()
-        return plan
-
-    def get_overdue_count(self, obj):
-        return obj.installments.filter(status=StudentPaymentInstallment.STATUS_OVERDUE).count()
-
-    def get_alert_count(self, obj):
-        return sum(1 for installment in obj.installments.all() if installment.status == StudentPaymentInstallment.STATUS_OVERDUE)
-
 
 class PaiementSerializer(serializers.ModelSerializer):
     etudiant_nom = serializers.CharField(source="etudiant.nom", read_only=True)
-    formation_nom = serializers.CharField(source="formation.intitule", read_only=True)
+    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
     frais_libelle = serializers.CharField(source="frais.libelle", read_only=True)
     classe_nom = serializers.CharField(source="frais.classe.nom", read_only=True)
 
@@ -200,8 +163,8 @@ class PaiementSerializer(serializers.ModelSerializer):
             "id",
             "etudiant",
             "etudiant_nom",
-            "formation",
-            "formation_nom",
+            "filiere",
+            "filiere_nom",
             "frais",
             "frais_libelle",
             "classe_nom",

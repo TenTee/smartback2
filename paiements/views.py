@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db.models import Max, Sum, Value, DecimalField
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -8,13 +9,14 @@ from rest_framework.views import APIView
 from etudiants.models import Etudiant
 
 from .models import (
-    FormationPaymentPolicy,
+    FilierePaymentPolicy,
+    Frais,
     Paiement,
     StudentPaymentInstallment,
     StudentPaymentPlan,
 )
 from .serializers import (
-    FormationPaymentPolicySerializer,
+    FilierePaymentPolicySerializer,
     PaiementAggregatedSerializer,
     PaiementSerializer,
     PaymentAlertSerializer,
@@ -26,7 +28,7 @@ class PaiementListCreate(generics.ListCreateAPIView):
     serializer_class = PaiementSerializer
 
     def get_queryset(self):
-        queryset = Paiement.objects.select_related("etudiant", "formation", "frais", "frais__classe").all()
+        queryset = Paiement.objects.select_related("etudiant", "filiere", "frais", "frais__classe").all()
         etudiant_id = self.request.query_params.get("etudiant")
         frais_id = self.request.query_params.get("frais")
         if etudiant_id:
@@ -37,16 +39,34 @@ class PaiementListCreate(generics.ListCreateAPIView):
 
 
 class PaiementDetail(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Paiement.objects.select_related("etudiant", "formation", "frais", "frais__classe").all()
+    queryset = Paiement.objects.select_related("etudiant", "filiere", "frais", "frais__classe").all()
     serializer_class = PaiementSerializer
 
 
 class PaiementAggregated(APIView):
     def get(self, request):
-        etudiants = Etudiant.objects.select_related("filiere")
+        etudiants = Etudiant.objects.select_related("filiere").prefetch_related("inscriptions", "inscriptions__classe")
         results = []
         for etudiant in etudiants:
-            paiements = Paiement.objects.filter(etudiant=etudiant, formation=etudiant.filiere)
+            # Récupérer l'inscription active (la plus récente)
+            derniere_inscription = etudiant.inscriptions.order_by("-date_inscription").first()
+            
+            classe = derniere_inscription.classe if derniere_inscription else None
+            
+            # Calculer les frais dûs
+            montant_du_inscription = Decimal("0")
+            montant_du_formation = Decimal("0")
+            
+            if classe:
+                frais_classe = Frais.objects.filter(classe=classe)
+                frais_inscription = frais_classe.filter(libelle__icontains="inscription")
+                frais_formation = frais_classe.exclude(libelle__icontains="inscription")
+                
+                montant_du_inscription = frais_inscription.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
+                montant_du_formation = frais_formation.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
+            
+            # Calculer les paiements effectués
+            paiements = Paiement.objects.filter(etudiant=etudiant)
             paiements_inscription = paiements.filter(paiement_type="INSCRIPTION")
             paiements_formation = paiements.filter(paiement_type="FORMATION")
 
@@ -59,10 +79,9 @@ class PaiementAggregated(APIView):
             montant_paye_formation_total = paiements_formation.aggregate(
                 total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
             )["total"]
+            
             derniere_date = paiements.aggregate(last=Max("date_paiement"))["last"]
 
-            montant_du_inscription = getattr(etudiant.filiere, "frais_inscription", 0)
-            montant_du_formation = getattr(etudiant.filiere, "montant", 0)
             solde_inscription = float(montant_du_inscription) - float(montant_paye_inscription_total)
             solde_formation = float(montant_du_formation) - float(montant_paye_formation_total)
             solde = float(montant_du_inscription + montant_du_formation) - float(montant_paye_total)
@@ -71,16 +90,16 @@ class PaiementAggregated(APIView):
                 {
                     "etudiant": etudiant.id,
                     "etudiant_nom": etudiant.nom,
-                    "formation": etudiant.filiere.id,
-                    "formation_nom": etudiant.filiere.intitule,
+                    "formation": etudiant.filiere.id if etudiant.filiere else 0,
+                    "formation_nom": etudiant.filiere.nom if etudiant.filiere else "N/A",
                     "montant_du": float(montant_du_inscription + montant_du_formation),
                     "montant_paye_total": montant_paye_total,
                     "solde_restant": solde,
-                    "montant_du_inscription": montant_du_inscription,
-                    "montant_paye_inscription_total": montant_paye_inscription_total,
+                    "montant_du_inscription": float(montant_du_inscription),
+                    "montant_paye_inscription_total": float(montant_paye_inscription_total),
                     "solde_restant_inscription": solde_inscription,
-                    "montant_du_formation": montant_du_formation,
-                    "montant_paye_formation_total": montant_paye_formation_total,
+                    "montant_du_formation": float(montant_du_formation),
+                    "montant_paye_formation_total": float(montant_paye_formation_total),
                     "solde_restant_formation": solde_formation,
                     "derniere_date": derniere_date,
                 }
@@ -90,35 +109,35 @@ class PaiementAggregated(APIView):
         return Response(serializer.data)
 
 
-class FormationPaymentPolicyListCreateView(generics.ListCreateAPIView):
-    queryset = FormationPaymentPolicy.objects.select_related("formation").prefetch_related("four_installments").all()
-    serializer_class = FormationPaymentPolicySerializer
+class FilierePaymentPolicyListCreateView(generics.ListCreateAPIView):
+    queryset = FilierePaymentPolicy.objects.select_related("filiere").prefetch_related("four_installments").all()
+    serializer_class = FilierePaymentPolicySerializer
 
 
-class FormationPaymentPolicyDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = FormationPaymentPolicy.objects.select_related("formation").prefetch_related("four_installments").all()
-    serializer_class = FormationPaymentPolicySerializer
+class FilierePaymentPolicyDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = FilierePaymentPolicy.objects.select_related("filiere").prefetch_related("four_installments").all()
+    serializer_class = FilierePaymentPolicySerializer
 
 
 class StudentPaymentPlanListCreateView(generics.ListCreateAPIView):
     serializer_class = StudentPaymentPlanSerializer
 
     def get_queryset(self):
-        queryset = StudentPaymentPlan.objects.select_related("etudiant", "formation", "policy").prefetch_related("installments").all()
+        queryset = StudentPaymentPlan.objects.select_related("etudiant", "filiere", "policy").prefetch_related("installments").all()
         etudiant_id = self.request.query_params.get("etudiant")
-        formation_id = self.request.query_params.get("formation")
+        filiere_id = self.request.query_params.get("filiere")
         status_value = self.request.query_params.get("status")
         if etudiant_id:
             queryset = queryset.filter(etudiant_id=etudiant_id)
-        if formation_id:
-            queryset = queryset.filter(formation_id=formation_id)
+        if filiere_id:
+            queryset = queryset.filter(filiere_id=filiere_id)
         if status_value:
             queryset = queryset.filter(status=status_value)
         return queryset
 
 
 class StudentPaymentPlanDetailView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = StudentPaymentPlan.objects.select_related("etudiant", "formation", "policy").prefetch_related("installments").all()
+    queryset = StudentPaymentPlan.objects.select_related("etudiant", "filiere", "policy").prefetch_related("installments").all()
     serializer_class = StudentPaymentPlanSerializer
 
 
@@ -126,13 +145,13 @@ class PaymentAlertListView(APIView):
     def get(self, request):
         today = timezone.localdate()
         etudiant_id = request.query_params.get("etudiant")
-        formation_id = request.query_params.get("formation")
+        filiere_id = request.query_params.get("filiere")
 
-        installments = StudentPaymentInstallment.objects.select_related("plan", "plan__etudiant", "plan__formation").all()
+        installments = StudentPaymentInstallment.objects.select_related("plan", "plan__etudiant", "plan__filiere").all()
         if etudiant_id:
             installments = installments.filter(plan__etudiant_id=etudiant_id)
-        if formation_id:
-            installments = installments.filter(plan__formation_id=formation_id)
+        if filiere_id:
+            installments = installments.filter(plan__filiere_id=filiere_id)
 
         alerts = []
         for installment in installments:
@@ -157,8 +176,8 @@ class PaymentAlertListView(APIView):
                     "plan_id": installment.plan_id,
                     "etudiant_id": installment.plan.etudiant_id,
                     "etudiant_nom": installment.plan.etudiant.nom,
-                    "formation_id": installment.plan.formation_id,
-                    "formation_nom": installment.plan.formation.intitule,
+                    "formation_id": installment.plan.filiere_id,
+                    "formation_nom": installment.plan.filiere.nom,
                     "installment_id": installment.id,
                     "label": installment.label,
                     "due_date": installment.due_date,

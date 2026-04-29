@@ -11,24 +11,24 @@ from .views import (
     ClasseViewSet,
     CourseViewSet,
     CycleViewSet,
-    DomaineViewSet,
+    DepartementViewSet,
     EvaluationViewSet,
-    FaculteViewSet,
     FiliereViewSet,
     FraisViewSet,
     LevelViewSet,
-    SemestreViewSet,
-    SpecialiteViewSet,
+    ParametresGlobauxViewSet,
     PreInscriptionViewSet,
+    SemestreViewSet,
+    UniversiteTutelleViewSet,
 )
 
 router = DefaultRouter()
-router.register(r"facultes", FaculteViewSet, basename="academique-faculte")
-router.register(r"domaines", DomaineViewSet, basename="academique-domaine")
+router.register(r"parametres-globaux", ParametresGlobauxViewSet, basename="academique-parametres-globaux")
+router.register(r"universites-tutelles", UniversiteTutelleViewSet, basename="academique-universite-tutelle")
+router.register(r"departements", DepartementViewSet, basename="academique-departement")
 router.register(r"filieres", FiliereViewSet, basename="academique-filiere")
-router.register(r"specialites", SpecialiteViewSet, basename="academique-specialite")
 router.register(r"cycles", CycleViewSet, basename="academique-cycle")
-router.register(r"levels", LevelViewSet, basename="academique-level")
+router.register(r"niveaux", LevelViewSet, basename="academique-niveau")
 router.register(r"courses", CourseViewSet, basename="academique-course")
 router.register(r"annees-academiques", AnneeAcademiqueViewSet, basename="academique-annee")
 router.register(r"classes", ClasseViewSet, basename="academique-classe")
@@ -41,6 +41,11 @@ router.register(r"frais", FraisViewSet, basename="academique-frais")
 router.register(r"paiements", AcademicPaiementViewSet, basename="academique-paiement")
 router.register(r"emplois-du-temps", AcademicEmploiDuTempsViewSet, basename="academique-emploi")
 router.register(r"pre-inscriptions", PreInscriptionViewSet, basename="academique-preinscription")
+
+# Alias de compatibilité
+router.register(r"facultes", UniversiteTutelleViewSet, basename="academique-faculte")
+router.register(r"domaines", DepartementViewSet, basename="academique-domaine")
+router.register(r"levels", LevelViewSet, basename="academique-level")
 
 urlpatterns = [
     path("", include(router.urls)),

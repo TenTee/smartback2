@@ -2,7 +2,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
-from formations.models import Formation, Niveau
+from academique.models import Filiere, Niveau
 from revenus.models import Revenu  
 
 class Etudiant(models.Model):
@@ -15,12 +15,16 @@ class Etudiant(models.Model):
     contact = models.CharField(max_length=50)
     email = models.EmailField(unique=True)
     date_naissance = models.DateField(null=True, blank=True)
-    filiere = models.ForeignKey(Formation, on_delete=models.CASCADE, related_name="etudiants")
+    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="etudiants")
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='Pré-inscrit')
+    
     def save(self, *args, **kwargs):
         # Génération automatique du matricule
         if not self.matricule:
-            filiere_code = self.filiere.intitule[:4].upper()
+            filiere_code = "ETUD"
+            if self.filiere_id:
+                filiere_code = self.filiere.nom[:4].upper()
+            
             annee = timezone.now().year
             count = Etudiant.objects.filter(
                 filiere=self.filiere,
@@ -30,26 +34,7 @@ class Etudiant(models.Model):
 
         super().save(*args, **kwargs)
 
-        # ✅ Création ou mise à jour du revenu d’inscription
-        statut_revenu = "En attente" if self.statut == "Pré-inscrit" else "Validé"
-        revenu, created = Revenu.objects.get_or_create(
-            libelle=f"Inscription {self.matricule}",  # clé unique basée sur matricule
-            categorie="Inscription",
-            defaults={
-                "montant": 25000,
-                "responsable": self.nom,
-                "statut": statut_revenu
-            }
-        )
-        if not created:
-            # Mise à jour si l'étudiant est modifié
-            revenu.responsable = self.nom
-            revenu.statut = statut_revenu
-            revenu.save()
-
     def delete(self, *args, **kwargs):
-        # ✅ Supprimer aussi le revenu lié
-        Revenu.objects.filter(libelle=f"Inscription {self.matricule}", categorie="Inscription").delete()
         super().delete(*args, **kwargs)
 
     def __str__(self):
@@ -61,16 +46,16 @@ class Inscription(models.Model):
     classe = models.ForeignKey(
         "academique.Classe",
         on_delete=models.SET_NULL,
-        related_name="inscriptions",
+        related_name="inscriptions_detail",
         null=True,
         blank=True,
     )
     niveau = models.ForeignKey(Niveau, on_delete=models.CASCADE, related_name="inscriptions")
-    annee_academique = models.CharField(max_length=9, help_text="Ex: 2024-2025")
+    annee_academique = models.CharField(max_length=15, help_text="Ex: 2024-2025")
     annee_academique_ref = models.ForeignKey(
         "academique.AnneeAcademique",
         on_delete=models.SET_NULL,
-        related_name="inscriptions",
+        related_name="inscriptions_academique",
         null=True,
         blank=True,
     )
@@ -81,7 +66,7 @@ class Inscription(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["etudiant", "classe", "annee_academique_ref"],
-                name="unique_inscription_per_student_class_year",
+                name="unique_inscription_per_student_class_year_new",
             )
         ]
 

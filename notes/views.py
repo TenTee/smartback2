@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 
 from .models import Note, Etudiant, Module
 from etudiants.models import Inscription
-from formations.models import Formation
+from academique.models import Filiere, Niveau, CourseAssignment
 from .serializers import NoteSerializer, NoteSummarySerializer, NoteFiliereSerializer
 
 
@@ -35,7 +35,7 @@ class NoteViewSet(viewsets.ModelViewSet):
                     "etudiant_id",
                     "etudiant__nom",
                     "etudiant__matricule",
-                    "etudiant__filiere__intitule",
+                    "etudiant__filiere__nom",
                     "session"
                 )
                 .distinct()
@@ -64,7 +64,7 @@ class NoteViewSet(viewsets.ModelViewSet):
                     "etudiant_id": etudiant_id,
                     "etudiant_nom": n["etudiant__nom"],
                     "etudiant_matricule": n["etudiant__matricule"],
-                    "formation": n["etudiant__filiere__intitule"],
+                    "formation": n["etudiant__filiere__nom"],
                     "session": session,
                     "moyenne_generale": moyenne_sur_20,
                     "mention": mention,
@@ -75,7 +75,6 @@ class NoteViewSet(viewsets.ModelViewSet):
 
         return super().list(request, *args, **kwargs)
 
-    # ✅ Action pour filtrer par module
     @action(detail=False, methods=["get"], url_path="par-module")
     def par_module(self, request):
         module_id = request.query_params.get("module_id")
@@ -113,7 +112,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                 "session": session,
                 "note_cc": note.note_cc if note else None,
                 "note_sn": note.note_sn if note else None,
-                "note_tp": note.note_tp if note else None,
                 "note_rattrapage": note.note_rattrapage if note else None,
                 "note_finale": note.note_finale if note else None,
                 "note_sur_20": note_sur_20,
@@ -122,7 +120,6 @@ class NoteViewSet(viewsets.ModelViewSet):
 
         return Response(data)
 
-    # ✅ Action pour filtrer par filière
     @action(detail=False, methods=["get"], url_path="par-filiere")
     def par_filiere(self, request):
         filiere_id = request.query_params.get("filiere_id")
@@ -132,17 +129,19 @@ class NoteViewSet(viewsets.ModelViewSet):
             return Response({"error": "filiere_id requis"}, status=400)
 
         try:
-            formation = Formation.objects.get(pk=filiere_id)
-        except Formation.DoesNotExist:
+            filiere = Filiere.objects.get(pk=filiere_id)
+        except Filiere.DoesNotExist:
             return Response({"error": "Filière introuvable"}, status=404)
 
-        modules = formation.modules.all()
+        # In the new system, modules are related to Filiere via CourseAssignment
+        module_ids = CourseAssignment.objects.filter(filiere=filiere).values_list('module_id', flat=True)
+        modules = Module.objects.filter(id__in=module_ids)
         etudiants = Etudiant.objects.filter(filiere_id=filiere_id).distinct()
 
         data = {
-            "filiere_id": formation.id,
-            "filiere_nom": formation.intitule,
-            "modules": [{"id": m.id, "nom": m.nom, "has_tp": bool(getattr(m, "has_tp", False))} for m in modules],
+            "filiere_id": filiere.id,
+            "filiere_nom": filiere.nom,
+            "modules": [{"id": m.id, "nom": m.nom} for m in modules],
             "etudiants": []
         }
 
@@ -165,7 +164,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                     "module_nom": module.nom,
                     "note_cc": note.note_cc if note else None,
                     "note_sn": note.note_sn if note else None,
-                    "note_tp": note.note_tp if note else None,
                     "note_rattrapage": note.note_rattrapage if note else None,
                     "note_finale": note.note_finale if note else None,
                     "note_sur_20": float(note.note_finale) if note and note.note_finale else None
@@ -175,7 +173,6 @@ class NoteViewSet(viewsets.ModelViewSet):
         serializer = NoteFiliereSerializer(data)
         return Response(serializer.data)
 
-    # ✅ Notes par filière et par niveau avec classement
     @action(detail=False, methods=["get"], url_path="par-filiere-niveau")
     def par_filiere_niveau(self, request):
         filiere_id = request.query_params.get("filiere_id")
@@ -185,21 +182,25 @@ class NoteViewSet(viewsets.ModelViewSet):
             return Response({"error": "filiere_id requis"}, status=400)
 
         try:
-            formation = Formation.objects.get(pk=filiere_id)
-        except Formation.DoesNotExist:
+            # We filter by filiere
+            filiere = Filiere.objects.get(pk=filiere_id)
+        except Filiere.DoesNotExist:
             return Response({"error": "Filière introuvable"}, status=404)
 
-        niveaux = formation.niveaux.all()
+        # In the new system, we get levels from the filiere structure (Cycle -> Niveau)
+        niveaux = Niveau.objects.filter(cycle__filiere=filiere)
 
         data = {
-            "filiere_id": formation.id,
-            "filiere_nom": formation.intitule,
+            "filiere_id": filiere.id,
+            "filiere_nom": filiere.nom,
             "session": session,
             "niveaux": []
         }
 
         for niveau in niveaux:
-            modules = niveau.modules.all()
+            # Modules assigned to this (filiere, level)
+            module_ids = CourseAssignment.objects.filter(filiere=filiere, niveau=niveau).values_list('module_id', flat=True)
+            modules = Module.objects.filter(id__in=module_ids)
             etudiants = Etudiant.objects.filter(inscriptions__niveau=niveau).distinct()
             etudiants_data = []
 
@@ -226,7 +227,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                         "module_nom": module.nom,
                         "note_cc": note.note_cc if note else None,
                         "note_sn": note.note_sn if note else None,
-                        "note_tp": note.note_tp if note else None,
                         "note_rattrapage": note.note_rattrapage if note else None,
                         "note_finale": note_finale,
                         "note_sur_20": float(note_finale) if note_finale is not None else None
@@ -241,7 +241,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                     "notes": notes
                 })
 
-            # Classement par moyenne décroissante (None en dernier)
             etudiants_data.sort(key=lambda x: (x["moyenne_niveau"] is None, -(x["moyenne_niveau"] or 0)))
             for idx, e in enumerate(etudiants_data, start=1):
                 e["rang"] = idx
@@ -249,13 +248,12 @@ class NoteViewSet(viewsets.ModelViewSet):
             data["niveaux"].append({
                 "niveau_id": niveau.id,
                 "niveau_nom": niveau.nom,
-                "modules": [{"id": m.id, "nom": m.nom, "has_tp": bool(getattr(m, "has_tp", False))} for m in modules],
+                "modules": [{"id": m.id, "nom": m.nom} for m in modules],
                 "etudiants": etudiants_data
             })
 
         return Response(data)
 
-    # ✅ Action pour récupérer les notes d’un étudiant dans tous ses modules
     @action(detail=True, methods=["get"], url_path="details")
     def details(self, request, pk=None):
         session = request.query_params.get("session")
@@ -280,11 +278,9 @@ class NoteViewSet(viewsets.ModelViewSet):
                 "module_nom": note.module.nom,
                 "note_cc": note.note_cc,
                 "note_sn": note.note_sn,
-                "note_tp": note.note_tp,
                 "note_rattrapage": note.note_rattrapage,
                 "note_finale": note.note_finale,
                 "note_sur_20": float(note.note_finale) if note and note.note_finale else None,
-                "module_has_tp": bool(getattr(note.module, "has_tp", False)),
             })
 
         return Response(data)

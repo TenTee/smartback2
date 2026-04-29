@@ -30,7 +30,6 @@ class NoteSerializer(serializers.ModelSerializer):
             "session",
             "note_cc",
             "note_sn",
-            "note_tp",
             "note_rattrapage",
             "note_finale",
             "note_sur_20",   # ✅ ajouté
@@ -61,7 +60,6 @@ class NoteDetailSerializer(serializers.Serializer):
     module_nom = serializers.CharField()
     note_cc = serializers.FloatField(default=0)
     note_sn = serializers.FloatField(default=0)
-    note_tp = serializers.FloatField(default=0)
     note_rattrapage = serializers.FloatField(default=0)
     note_finale = serializers.FloatField(default=0)
     note_sur_20 = serializers.FloatField(default=0)   # ✅ ajouté
@@ -73,7 +71,6 @@ class EtudiantNoteSerializer(serializers.Serializer):
     module_nom = serializers.CharField()
     note_cc = serializers.FloatField(allow_null=True)
     note_sn = serializers.FloatField(allow_null=True)
-    note_tp = serializers.FloatField(allow_null=True)
     note_rattrapage = serializers.FloatField(allow_null=True)
     note_finale = serializers.FloatField(allow_null=True)
     note_sur_20 = serializers.FloatField(allow_null=True)   # ✅ ajouté

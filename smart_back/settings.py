@@ -42,7 +42,6 @@ INSTALLED_APPS = [
     # apps internes
     'users',
     'admin_api',
-    'formations',
     'academique',
     'modules',
     'files',

@@ -8,6 +8,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 
 from .models import Etudiant, EtudiantDocument, Inscription
 from .serializers import EtudiantSerializer, EtudiantDocumentSerializer, InscriptionSerializer
+from academique.models import CourseAssignment
 
 
 # Liste + création
@@ -27,15 +28,11 @@ class EtudiantListCreateView(generics.ListCreateAPIView):
         if filiere_id is not None and filiere_id.isdigit():
             queryset = queryset.filter(filiere_id=int(filiere_id))
 
-        # Filtre par module (via filière ou niveau)
+        # Filtre par module (via CourseAssignment)
         if module_id is not None and module_id.isdigit():
-            # Si module lié à niveau lié à étudiant (via inscription actuelle ou historique)
-            # Simplification : on garde le filtre par filière si besoin, mais ici on veut filtrer par module.
-            # L'ancien code supposait filiere.modules.
-            # Maintenant module est dans Niveau.
-            # Mais Formation a encore modules (M2M) si on l'a gardé, ou on passe par Inscription.
-            # Pour l'instant, on laisse tel quel si filiere.modules existe encore.
-            queryset = queryset.filter(filiere__modules__id=int(module_id))
+            # Students in filieres where this module is assigned
+            filiere_ids = CourseAssignment.objects.filter(module_id=int(module_id)).values_list('filiere_id', flat=True)
+            queryset = queryset.filter(filiere_id__in=filiere_ids)
             
         # Filtre par niveau (via inscription)
         if niveau_id is not None and niveau_id.isdigit():
@@ -136,11 +133,11 @@ class ValiderInscriptionView(APIView):
         
         # Passer l'étudiant à Inscrit
         etudiant.statut = 'Inscrit'
-        etudiant.save()  # Déclenche la mise à jour de Revenu à 'Validé' et la création des notes (via signals)
+        etudiant.save() 
 
         # Renvoyer la nouvelle data
         serializer = EtudiantSerializer(etudiant)
         return Response({
-            "message": "Inscription validée avec succès. Facture validée et notes générées.",
+            "message": "Inscription validée avec succès.",
             "etudiant": serializer.data
         }, status=status.HTTP_200_OK)

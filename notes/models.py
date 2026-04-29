@@ -31,7 +31,6 @@ class Note(models.Model):
     # ✅ Notes
     note_cc = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note CC sur 20")
     note_sn = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note SN sur 20")
-    note_tp = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note TP sur 20 (si applicable)")
     note_rattrapage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note Rattrapage sur 20 (facultatif)")
 
     # ✅ Calcul automatique
@@ -40,7 +39,7 @@ class Note(models.Model):
     def save(self, *args, **kwargs):
         """
         Calcul automatique pondéré de la note finale (sur 20) à partir des notes sur 20.
-        note_finale = (cc*%cc + sn_ou_rattrapage*%sn [+ tp*%tp]) / 100
+        note_finale = (cc*%cc + sn_ou_rattrapage*%sn) / 100
         - Si rattrapage existe → SN remplacée par rattrapage
         """
         if self.evaluation_id:
@@ -56,17 +55,18 @@ class Note(models.Model):
 
         m = self.module
         if m and self.note_cc is not None:
-            pc = getattr(m, "pourcentage_cc", 0) or 0
-            psn = getattr(m, "pourcentage_sn", 0) or 0
-            ptp = getattr(m, "pourcentage_tp", 0) or 0
-            use_tp = getattr(m, "has_tp", False) and (self.note_tp is not None)
+            from academique.models import ParametresGlobaux
+            params = ParametresGlobaux.get_parametres()
+            pc = params.pourcentage_cc
+            psn = params.pourcentage_sn
+            
             sn_or_r = self.note_rattrapage if self.note_rattrapage is not None else self.note_sn
             total = (float(self.note_cc) * pc) + (float(sn_or_r or 0) * psn)
-            if use_tp:
-                total += float(self.note_tp) * ptp
+            
             # Conversion sur 20
             self.note_finale = round(total / 100.0, 2)
         super().save(*args, **kwargs)
+
 
     @property
     def note_sur_20(self):

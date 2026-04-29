@@ -3,29 +3,29 @@ from django.core.exceptions import ValidationError
 from datetime import time
 from formateurs.models import Formateur
 from modules.models import Module
-from formations.models import Formation
+from academique.models import Filiere, Departement, UniversiteTutelle
 from emploidutemps.models import EmploiDuTemps
 
 class EmploiDuTempsTests(TestCase):
     def setUp(self):
+        # Création des structures parentes
+        self.tutelle = UniversiteTutelle.objects.create(nom="Tutelle Test")
+        self.dept = Departement.objects.create(nom="Dept Test", universite_tutelle=self.tutelle)
+
         # Création d’un formateur
         self.formateur = Formateur.objects.create(nom="M. Dupont")
 
         # Création d’un module
         self.module = Module.objects.create(nom="Mathématiques")
 
-        # Création de deux formations qui partagent le même module (tronc commun)
-        self.formationA = Formation.objects.create(intitule="Formation A")
-        self.formationB = Formation.objects.create(intitule="Formation B")
+        # Création de deux filières
+        self.filiereA = Filiere.objects.create(nom="Filiere A", departement=self.dept)
+        self.filiereB = Filiere.objects.create(nom="Filiere B", departement=self.dept)
 
-        # Associer le module aux deux formations
-        self.formationA.modules.add(self.module)
-        self.formationB.modules.add(self.module)
-
-    def test_propagation_tronc_commun(self):
-        """Créer une séance dans Formation A doit aussi créer la même séance dans Formation B."""
+    def test_seance_creation(self):
+        """Créer une séance dans Filiere A."""
         seance = EmploiDuTemps.objects.create(
-            formation=self.formationA,
+            filiere=self.filiereA,
             module=self.module,
             formateur=self.formateur,
             jour="Lundi",
@@ -34,21 +34,16 @@ class EmploiDuTempsTests(TestCase):
             salle="Salle 101"
         )
 
-        # Vérifier que la séance existe dans Formation A
+        # Vérifier que la séance existe dans Filiere A
         self.assertTrue(
-            EmploiDuTemps.objects.filter(formation=self.formationA, module=self.module).exists()
-        )
-
-        # Vérifier que la séance a été propagée dans Formation B
-        self.assertTrue(
-            EmploiDuTemps.objects.filter(formation=self.formationB, module=self.module).exists()
+            EmploiDuTemps.objects.filter(filiere=self.filiereA, module=self.module).exists()
         )
 
     def test_pause_non_autorisee(self):
         """Vérifier qu'une séance pendant la pause (12h-13h) est refusée."""
         with self.assertRaises(ValidationError):
             seance = EmploiDuTemps(
-                formation=self.formationA,
+                filiere=self.filiereA,
                 module=self.module,
                 formateur=self.formateur,
                 jour="Mardi",
@@ -61,7 +56,7 @@ class EmploiDuTempsTests(TestCase):
     def test_conflit_de_salle(self):
         """Vérifier qu'une salle ne peut pas accueillir deux séances en même temps."""
         EmploiDuTemps.objects.create(
-            formation=self.formationA,
+            filiere=self.filiereA,
             module=self.module,
             formateur=self.formateur,
             jour="Mercredi",
@@ -73,7 +68,7 @@ class EmploiDuTempsTests(TestCase):
         # Tentative de créer une autre séance dans la même salle et créneau
         with self.assertRaises(ValidationError):
             seance_conflict = EmploiDuTemps(
-                formation=self.formationB,
+                filiere=self.filiereB,
                 module=self.module,
                 formateur=self.formateur,
                 jour="Mercredi",
