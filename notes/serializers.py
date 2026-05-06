@@ -10,6 +10,7 @@ class NoteSerializer(serializers.ModelSerializer):
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     evaluation_nom = serializers.CharField(source="evaluation.libelle", read_only=True)
     formation = serializers.CharField(source="etudiant.filiere.intitule", read_only=True)
+    session = serializers.CharField(read_only=True)
     note_sur_20 = serializers.SerializerMethodField()
     besoin_rattrapage = serializers.SerializerMethodField()
 

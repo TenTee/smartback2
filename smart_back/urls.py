@@ -11,9 +11,9 @@ from drf_spectacular.views import (
 )
 from smart_back.pagination import StandardResultsSetPagination
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
 )
+from users.views import MyTokenObtainPairView
 
 def api_home(request):
     return JsonResponse({
@@ -36,7 +36,7 @@ urlpatterns = [
     path('', api_home),  # page d’accueil API
 
     # ✅ Endpoints JWT
-    path('api/auth/login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),  # alias login
+    path('api/auth/login/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),  # alias login
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
 
     # Admin

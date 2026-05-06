@@ -12,6 +12,7 @@ from .models import (
     Classe,
     CourseAssignment,
     Cycle,
+    CycleGlobal,
     Departement,
     Evaluation,
     Filiere,
@@ -34,6 +35,13 @@ class ParametresGlobauxSerializer(serializers.ModelSerializer):
         if cc + sn != 100:
             raise serializers.ValidationError("La somme de CC et SN doit être exactement 100%.")
         return attrs
+
+
+class CycleGlobalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CycleGlobal
+        fields = ["id", "nom", "code", "description", "heure_pause_debut", "heure_pause_fin", "heure_debut_journee", "heure_fin_journee", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
 
 
 class CaseInsensitiveUniqueWithinParentMixin:
@@ -160,6 +168,7 @@ class CycleSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.ModelS
             "id",
             "filiere",
             "filiere_nom",
+            "type_cycle",
             "departement_nom",
             "nom",
             "name",
@@ -237,10 +246,6 @@ class CourseSerializer(serializers.ModelSerializer):
             "name",
             "duree",
             "coefficient",
-            "has_tp",
-            "pourcentage_cc",
-            "pourcentage_sn",
-            "pourcentage_tp",
             "semestre",
             "filiere",
             "cycle",
@@ -315,18 +320,10 @@ class CourseSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
-        has_tp = attrs.get("has_tp", getattr(self.instance, "has_tp", False))
         filiere = attrs.get("filiere")
         cycle = attrs.get("cycle")
         niveau = attrs.get("niveau")
-        pourcentage_cc = attrs.get("pourcentage_cc", getattr(self.instance, "pourcentage_cc", 0)) or 0
-        pourcentage_sn = attrs.get("pourcentage_sn", getattr(self.instance, "pourcentage_sn", 0)) or 0
-        pourcentage_tp = attrs.get("pourcentage_tp", getattr(self.instance, "pourcentage_tp", 0)) or 0
 
-        total = pourcentage_cc + pourcentage_sn + (pourcentage_tp if has_tp else 0)
-        if total != 100:
-            raise serializers.ValidationError("La somme des pourcentages doit être égale à 100.")
-        
         if filiere and cycle and cycle.filiere_id != filiere.id:
             raise serializers.ValidationError({"cycle": "Le cycle doit appartenir à la filière sélectionnée."})
         if cycle and niveau and niveau.cycle_id != cycle.id:
@@ -502,6 +499,16 @@ class AcademicNoteSerializer(serializers.ModelSerializer):
     evaluation_nom = serializers.CharField(source="evaluation.libelle", read_only=True)
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     module_nom = serializers.CharField(source="module.nom", read_only=True)
+    session = serializers.CharField(required=False, allow_blank=True)
+    annee_academique = serializers.CharField(required=False, allow_blank=True)
+    formateur_nom = serializers.SerializerMethodField()
+
+    def get_formateur_nom(self, obj):
+        if not obj.module_id or not obj.classe_id:
+            return "Non assigné"
+        from academique.models import Affectation
+        aff = Affectation.objects.filter(module_id=obj.module_id, classe_id=obj.classe_id).first()
+        return aff.enseignant.nom if aff and aff.enseignant else "Non assigné"
 
     class Meta:
         model = Note

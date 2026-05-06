@@ -27,11 +27,18 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        type_value = attrs.get("type") or self.instance.type if self.instance else None
+        type_value = attrs.get("type") or (self.instance.type if self.instance else None)
         minutes = attrs.get("minutes_retard")
+        justifie = attrs.get("justifie", self.instance.justifie if self.instance else False)
+        justificatif = attrs.get("justificatif", self.instance.justificatif if self.instance else None)
+
         if type_value == "RETARD":
             if minutes is None:
-                raise serializers.ValidationError("minutes_retard est requis pour un retard.")
+                raise serializers.ValidationError({"minutes_retard": "Les minutes de retard sont requises."})
         if type_value == "ABSENCE":
             attrs["minutes_retard"] = None
+        
+        if justifie and not justificatif:
+            raise serializers.ValidationError({"justificatif": "Un fichier justificatif est obligatoire pour justifier une absence ou un retard."})
+
         return attrs

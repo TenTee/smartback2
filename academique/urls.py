@@ -11,6 +11,7 @@ from .views import (
     ClasseViewSet,
     CourseViewSet,
     CycleViewSet,
+    CycleGlobalViewSet,
     DepartementViewSet,
     EvaluationViewSet,
     FiliereViewSet,
@@ -27,6 +28,7 @@ router.register(r"parametres-globaux", ParametresGlobauxViewSet, basename="acade
 router.register(r"universites-tutelles", UniversiteTutelleViewSet, basename="academique-universite-tutelle")
 router.register(r"departements", DepartementViewSet, basename="academique-departement")
 router.register(r"filieres", FiliereViewSet, basename="academique-filiere")
+router.register(r"cycles-globaux", CycleGlobalViewSet, basename="academique-cycle-global")
 router.register(r"cycles", CycleViewSet, basename="academique-cycle")
 router.register(r"niveaux", LevelViewSet, basename="academique-niveau")
 router.register(r"courses", CourseViewSet, basename="academique-course")

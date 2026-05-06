@@ -25,6 +25,7 @@ from .models import (
     AnneeAcademique,
     Classe,
     Cycle,
+    CycleGlobal,
     Departement,
     Evaluation,
     Filiere,
@@ -44,6 +45,7 @@ from .serializers import (
     ClasseSerializer,
     CourseSerializer,
     CycleSerializer,
+    CycleGlobalSerializer,
     DepartementSerializer,
     EvaluationSerializer,
     FiliereSerializer,
@@ -102,6 +104,13 @@ class FiliereViewSet(OptimizedModelViewSet):
         cycles = Cycle.objects.filter(filiere=self.get_object())
         serializer = CycleSerializer(cycles, many=True)
         return Response(serializer.data)
+
+
+class CycleGlobalViewSet(OptimizedModelViewSet):
+    queryset = CycleGlobal.objects.all()
+    serializer_class = CycleGlobalSerializer
+    search_fields = ("nom", "code", "description")
+    ordering = ("nom",)
 
 
 class CycleViewSet(OptimizedModelViewSet):
@@ -202,6 +211,104 @@ class AcademicNoteViewSet(OptimizedModelViewSet):
     filterset_fields = ("module", "classe", "evaluation")
     search_fields = ("etudiant__nom", "module__nom", "classe__nom")
     ordering = ("etudiant__nom",)
+
+    @action(detail=False, methods=['get'], url_path='saisie-groupee')
+    def saisie_groupee(self, request):
+        classe_id = request.query_params.get('classe')
+        module_id = request.query_params.get('module')
+        evaluation_id = request.query_params.get('evaluation')
+
+        if not classe_id or not module_id:
+            return Response({"error": "classe and module are required"}, status=400)
+
+        inscriptions = Inscription.objects.filter(classe_id=classe_id).select_related('etudiant')
+        
+        # Obtenir les notes existantes
+        existing_notes = Note.objects.filter(
+            classe_id=classe_id, 
+            module_id=module_id
+        )
+        if evaluation_id:
+            existing_notes = existing_notes.filter(evaluation_id=evaluation_id)
+        else:
+            existing_notes = existing_notes.filter(evaluation__isnull=True)
+            
+        notes_dict = {n.etudiant_id: n for n in existing_notes}
+
+        # Obtenir le formateur pour cette classe/module
+        from academique.models import Affectation
+        aff = Affectation.objects.filter(classe_id=classe_id, module_id=module_id).first()
+        formateur_nom = aff.enseignant.nom if aff and aff.enseignant else "Non assigné"
+
+        data = []
+        for ins in inscriptions:
+            etudiant = ins.etudiant
+            note = notes_dict.get(etudiant.id)
+            data.append({
+                "etudiant_id": etudiant.id,
+                "etudiant_nom": etudiant.nom,
+                "etudiant_matricule": etudiant.matricule,
+                "classe_id": int(classe_id),
+                "module_id": int(module_id),
+                "evaluation_id": int(evaluation_id) if evaluation_id else None,
+                "formateur_nom": formateur_nom,
+                "note_id": note.id if note else None,
+                "note_cc": note.note_cc if note else None,
+                "note_sn": note.note_sn if note else None,
+                "note_rattrapage": note.note_rattrapage if note else None,
+                "note_finale": note.note_finale if note else None,
+            })
+        return Response(data)
+
+    @action(detail=False, methods=['post'], url_path='batch-save')
+    def batch_save(self, request):
+        try:
+            notes_data = request.data.get('notes', [])
+            saved_notes = []
+
+            with transaction.atomic():
+                for item in notes_data:
+                    etudiant_id = item.get('etudiant_id')
+                    module_id = item.get('module_id')
+                    classe_id = item.get('classe_id')
+                    evaluation_id = item.get('evaluation_id')
+                    
+                    note_cc = item.get('note_cc')
+                    note_sn = item.get('note_sn')
+
+                    if not etudiant_id or not module_id:
+                        continue
+
+                    # Use filter().first() instead of update_or_create to avoid MultipleObjectsReturned
+                    note = Note.objects.filter(
+                        etudiant_id=etudiant_id,
+                        module_id=module_id,
+                        classe_id=classe_id,
+                        evaluation_id=evaluation_id,
+                    ).first()
+
+                    if note:
+                        note.note_cc = note_cc
+                        note.note_sn = note_sn
+                        note.save()
+                    else:
+                        note = Note.objects.create(
+                            etudiant_id=etudiant_id,
+                            module_id=module_id,
+                            classe_id=classe_id,
+                            evaluation_id=evaluation_id,
+                            note_cc=note_cc,
+                            note_sn=note_sn,
+                        )
+                    saved_notes.append(note)
+
+            return Response({
+                "message": f"{len(saved_notes)} notes enregistrées",
+                "data": AcademicNoteSerializer(saved_notes, many=True).data
+            })
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=500)
 
 
 class FraisViewSet(OptimizedModelViewSet):

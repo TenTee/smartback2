@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 
 from .models import Note, Etudiant, Module
 from etudiants.models import Inscription
-from academique.models import Filiere, Niveau, CourseAssignment
+from academique.models import Filiere, Niveau, CourseAssignment, Evaluation, Classe
 from .serializers import NoteSerializer, NoteSummarySerializer, NoteFiliereSerializer
 
 
@@ -253,6 +253,101 @@ class NoteViewSet(viewsets.ModelViewSet):
             })
 
         return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="saisie-groupee")
+    def saisie_groupee(self, request):
+        evaluation_id = request.query_params.get("evaluation")
+        classe_id = request.query_params.get("classe")
+        module_id = request.query_params.get("module")
+
+        if evaluation_id:
+            try:
+                evaluation = Evaluation.objects.get(pk=evaluation_id)
+                classe = evaluation.classe
+                module = evaluation.module
+            except Evaluation.DoesNotExist:
+                return Response({"error": "Évaluation introuvable"}, status=404)
+        elif classe_id and module_id:
+            try:
+                classe = Classe.objects.get(pk=classe_id)
+                module = Module.objects.get(pk=module_id)
+                evaluation = None
+            except (Classe.DoesNotExist, Module.DoesNotExist):
+                return Response({"error": "Classe ou Module introuvable"}, status=404)
+        else:
+            return Response({"error": "Paramètres manquants (evaluation_id ou classe_id+module_id)"}, status=400)
+
+        # Get all students enrolled in this class
+        inscriptions = Inscription.objects.filter(classe=classe).select_related('etudiant')
+        
+        data = []
+        for ins in inscriptions:
+            etudiant = ins.etudiant
+            # Fetch existing note if any
+            note_query = Note.objects.filter(etudiant=etudiant, module=module)
+            if evaluation:
+                note_query = note_query.filter(evaluation=evaluation)
+            else:
+                note_query = note_query.filter(classe=classe)
+            
+            note = note_query.first()
+
+            data.append({
+                "etudiant_id": etudiant.id,
+                "etudiant_nom": etudiant.nom,
+                "etudiant_matricule": etudiant.matricule,
+                "classe_id": classe.id,
+                "module_id": module.id,
+                "evaluation_id": evaluation.id if evaluation else None,
+                "note_id": note.id if note else None,
+                "note_cc": note.note_cc if note else None,
+                "note_sn": note.note_sn if note else None,
+                "note_rattrapage": note.note_rattrapage if note else None,
+                "note_finale": note.note_finale if note else None,
+            })
+
+        return Response(data)
+
+    @action(detail=False, methods=["post"], url_path="batch-save")
+    def batch_save(self, request):
+        notes_data = request.data.get("notes", [])
+        if not notes_data:
+            return Response({"error": "Aucune donnée fournie"}, status=400)
+
+        results = []
+        for item in notes_data:
+            etudiant_id = item.get("etudiant_id")
+            module_id = item.get("module_id")
+            classe_id = item.get("classe_id")
+            evaluation_id = item.get("evaluation_id")
+            
+            # Find existing note or create new one
+            defaults = {
+                "note_cc": item.get("note_cc"),
+                "note_sn": item.get("note_sn"),
+                "note_rattrapage": item.get("note_rattrapage"),
+                "classe_id": classe_id,
+                "evaluation_id": evaluation_id,
+            }
+            
+            # Filter criteria
+            filter_kwargs = {
+                "etudiant_id": etudiant_id,
+                "module_id": module_id,
+            }
+            if evaluation_id:
+                filter_kwargs["evaluation_id"] = evaluation_id
+            else:
+                filter_kwargs["classe_id"] = classe_id
+                filter_kwargs["evaluation__isnull"] = True
+
+            note, created = Note.objects.update_or_create(
+                **filter_kwargs,
+                defaults=defaults
+            )
+            results.append(NoteSerializer(note).data)
+
+        return Response({"message": f"{len(results)} notes enregistrées", "data": results}, status=200)
 
     @action(detail=True, methods=["get"], url_path="details")
     def details(self, request, pk=None):

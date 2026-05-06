@@ -10,8 +10,8 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
 
     # 🔎 Ajout de filtres et recherche
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ["jour", "formation", "niveau", "classe", "formateur", "module", "salle"]
-    search_fields = ["salle", "formation__intitule", "formateur__nom", "module__nom"]
+    filterset_fields = ["jour", "filiere", "niveau", "classe", "formateur", "module", "salle"]
+    search_fields = ["salle", "filiere__nom", "formateur__nom", "module__nom"]
     ordering_fields = ["heure_debut", "heure_fin"]
 
     def perform_create(self, serializer):

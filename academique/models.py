@@ -95,9 +95,27 @@ class Filiere(NamedDescriptionModel):
         return self.nom
 
 
+class CycleGlobal(NamedDescriptionModel):
+    nom = models.CharField(max_length=100, unique=True, help_text="Ex: BTS, Licence, Master")
+    code = models.CharField(max_length=50, blank=True)
+    heure_pause_debut = models.TimeField(default="12:00:00")
+    heure_pause_fin = models.TimeField(default="13:00:00")
+    heure_debut_journee = models.TimeField(default="08:00:00")
+    heure_fin_journee = models.TimeField(default="18:00:00")
+
+    class Meta:
+        verbose_name = "Cycle Global"
+        verbose_name_plural = "Cycles Globaux"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
+
 class Cycle(NamedDescriptionModel):
     filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="cycles")
-    nom = models.CharField(max_length=100)
+    type_cycle = models.ForeignKey(CycleGlobal, on_delete=models.PROTECT, related_name="cycles_acad", null=True, blank=True)
+    nom = models.CharField(max_length=100, blank=True) # Will be auto-filled from type_cycle if empty
     code = models.CharField(max_length=50, blank=True)
     ordre = models.PositiveIntegerField(default=1)
 
@@ -106,8 +124,13 @@ class Cycle(NamedDescriptionModel):
         verbose_name_plural = "Cycles"
         ordering = ["filiere__nom", "ordre", "nom"]
         constraints = [
-            models.UniqueConstraint(fields=["filiere", "nom"], name="unique_cycle_per_filiere"),
+            models.UniqueConstraint(fields=["filiere", "type_cycle"], name="unique_cycle_type_per_filiere"),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.type_cycle and not self.nom:
+            self.nom = self.type_cycle.nom
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.filiere.nom} - {self.nom}"
@@ -194,8 +217,8 @@ class AnneeAcademique(NamedDescriptionModel):
 
 class Classe(NamedDescriptionModel):
     filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="classes")
-    cycle = models.ForeignKey(Cycle, on_delete=models.PROTECT, related_name="classes")
-    niveau = models.ForeignKey(Niveau, on_delete=models.PROTECT, related_name="classes")
+    cycle = models.ForeignKey(Cycle, on_delete=models.CASCADE, related_name="classes")
+    niveau = models.ForeignKey(Niveau, on_delete=models.CASCADE, related_name="classes")
     annee_academique = models.ForeignKey(
         AnneeAcademique,
         on_delete=models.PROTECT,

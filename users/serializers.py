@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import CustomUser, Role
 
 
@@ -42,3 +43,42 @@ class UserSerializer(serializers.ModelSerializer):
             return RoleSerializer(role_obj).data
         except Role.DoesNotExist:
             return None
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    @classmethod
+    def get_token(cls, user):
+        token = super().get_token(user)
+
+        # Add custom claims
+        token['username'] = user.username
+        token['role'] = user.role
+        token['is_superuser'] = user.is_superuser
+        
+        # Add permissions if role exists
+        try:
+            role_obj = Role.objects.get(code=user.role)
+            token['permissions'] = {
+                'can_manage_rh': role_obj.can_manage_rh,
+                'can_manage_pedagogie': role_obj.can_manage_pedagogie,
+                'can_manage_logistique': role_obj.can_manage_logistique,
+                'can_manage_finance': role_obj.can_manage_finance,
+                'can_manage_etudiants': role_obj.can_manage_etudiants,
+            }
+        except Role.DoesNotExist:
+            # If user is superuser, give all permissions
+            if user.is_superuser:
+                token['permissions'] = {
+                    'can_manage_rh': True,
+                    'can_manage_pedagogie': True,
+                    'can_manage_logistique': True,
+                    'can_manage_finance': True,
+                    'can_manage_etudiants': True,
+                }
+            else:
+                token['permissions'] = {}
+
+        return token
+
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        data['user'] = UserSerializer(self.user).data
+        return data

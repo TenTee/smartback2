@@ -3,8 +3,9 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.utils.crypto import get_random_string
 
+from rest_framework_simplejwt.views import TokenObtainPairView
 from .models import CustomUser, Role
-from .serializers import UserSerializer, RoleSerializer
+from .serializers import UserSerializer, RoleSerializer, MyTokenObtainPairSerializer
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -49,3 +50,5 @@ class UserViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+class MyTokenObtainPairView(TokenObtainPairView):
+    serializer_class = MyTokenObtainPairSerializer
