@@ -1,14 +1,18 @@
 # etudiants/views.py
 import io, zipfile
 from django.http import HttpResponse
-from rest_framework import generics, status
+from django.utils import timezone
+from rest_framework import generics, status, viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.decorators import action
+from django.db.models import Q
 
-from .models import Etudiant, EtudiantDocument, Inscription
+from .models import Etudiant, EtudiantDocument, Inscription, SanctionDisciplinaire
 from .serializers import EtudiantSerializer, EtudiantDocumentSerializer, InscriptionSerializer
 from academique.models import CourseAssignment
+from academique.middleware import get_current_academic_year_id
 
 
 # Liste + création
@@ -17,6 +21,11 @@ class EtudiantListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = Etudiant.objects.all()
+        
+        # Filtre global par année académique (via le header X-Academic-Year)
+        year_id = get_current_academic_year_id()
+        if year_id:
+            queryset = queryset.filter(inscriptions__annee_academique_ref_id=year_id)
 
         # Récupération des paramètres GET
         filiere_id = self.request.query_params.get("filiere")
@@ -57,6 +66,11 @@ class InscriptionListCreateView(generics.ListCreateAPIView):
     
     def get_queryset(self):
         queryset = Inscription.objects.all()
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            queryset = queryset.filter(annee_academique_ref_id=year_id)
+            
         etudiant_id = self.request.query_params.get("etudiant")
         classe_id = self.request.query_params.get("classe")
         if etudiant_id:
@@ -141,3 +155,90 @@ class ValiderInscriptionView(APIView):
             "message": "Inscription validée avec succès.",
             "etudiant": serializer.data
         }, status=status.HTTP_200_OK)
+
+class MeEtudiantView(APIView):
+    """
+    Récupère le profil de l'étudiant actuellement connecté.
+    """
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response({"error": "Non authentifié"}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        try:
+            # Récupération via le related_name défini dans le modèle Etudiant
+            etudiant = getattr(request.user, 'etudiant_profile', None)
+            if not etudiant:
+                return Response({"error": "Profil étudiant introuvable pour cet utilisateur"}, status=status.HTTP_404_NOT_FOUND)
+            
+            serializer = EtudiantSerializer(etudiant)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class StudentPortalViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    ViewSet restreint pour les étudiants (Lecture seule).
+    """
+    serializer_class = EtudiantSerializer
+
+    def get_queryset(self):
+        if not self.request.user.is_authenticated:
+            return Etudiant.objects.none()
+        return Etudiant.objects.filter(user=self.request.user)
+
+    @action(detail=False, methods=["get"], url_path="me")
+    def me(self, request):
+        etudiant = getattr(request.user, 'etudiant_profile', None)
+        if not etudiant:
+            return Response({"error": "Profil introuvable"}, status=404)
+        serializer = self.get_serializer(etudiant)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="carte-etudiant")
+    def carte_etudiant(self, request):
+        etudiant = getattr(request.user, 'etudiant_profile', None)
+        if not etudiant:
+            return Response({"error": "Profil introuvable"}, status=404)
+        
+        # On renvoie les données pour que le front génère la carte
+        data = {
+            "nom": etudiant.nom,
+            "matricule": etudiant.matricule,
+            "filiere": etudiant.filiere.nom if etudiant.filiere else "N/A",
+            "photo": None,
+            "date_naissance": etudiant.date_naissance,
+            "etablissement": "IFPT SMART CAMPUS",
+        }
+        # On cherche si une photo est uploadée
+        photo = etudiant.documents.filter(type_document__icontains="Photo").first()
+        if photo:
+            data["photo"] = request.build_absolute_uri(photo.fichier.url)
+            
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="certificat-scolarite")
+    def certificat_scolarite(self, request):
+        etudiant = getattr(request.user, 'etudiant_profile', None)
+        if not etudiant:
+            return Response({"error": "Profil introuvable"}, status=404)
+            
+        year_id = get_current_academic_year_id()
+        if year_id:
+            derniere_ins = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
+        else:
+            derniere_ins = etudiant.inscriptions.order_by("-date_inscription").first()
+
+        if not derniere_ins:
+             return Response({"error": "Aucune inscription active trouvée pour cette année"}, status=400)
+
+        data = {
+            "nom": etudiant.nom,
+            "matricule": etudiant.matricule,
+            "filiere": etudiant.filiere.nom if etudiant.filiere else "N/A",
+            "niveau": derniere_ins.niveau.nom if derniere_ins.niveau else "N/A",
+            "annee_academique": derniere_ins.annee_academique or "N/A",
+            "date_emission": timezone.now().date(),
+            "lieu": "Douala",
+        }
+        return Response(data)

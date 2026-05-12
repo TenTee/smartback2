@@ -1,6 +1,6 @@
 # etudiants/serializers.py
 from rest_framework import serializers
-from .models import Etudiant, EtudiantDocument, Inscription
+from .models import Etudiant, EtudiantDocument, Inscription, SanctionDisciplinaire
 from academique.models import Filiere, Cycle, Niveau, Classe, AnneeAcademique
 from academique.serializers import FiliereSerializer, LevelSerializer
 
@@ -9,6 +9,12 @@ class EtudiantDocumentSerializer(serializers.ModelSerializer):
     class Meta:
         model = EtudiantDocument
         fields = ["id", "type_document", "fichier", "date_upload"]
+
+
+class SanctionDisciplinaireSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SanctionDisciplinaire
+        fields = ["id", "type_sanction", "motif", "date_sanction", "duree", "active"]
 
 
 # --- Inscriptions ---
@@ -62,6 +68,8 @@ class EtudiantSerializer(serializers.ModelSerializer):
     # Lecture seule
     documents = EtudiantDocumentSerializer(many=True, read_only=True)
     inscriptions = InscriptionSerializer(many=True, read_only=True)
+    sanctions = SanctionDisciplinaireSerializer(many=True, read_only=True)
+    username = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
         model = Etudiant
@@ -72,6 +80,8 @@ class EtudiantSerializer(serializers.ModelSerializer):
             "date_naissance",
             "contact",
             "email",
+            "nom_parent",
+            "whatsapp_parent",
             "filiere_details",
             "filiere_id",
             "cycle_id",
@@ -81,6 +91,9 @@ class EtudiantSerializer(serializers.ModelSerializer):
             "statut",
             "documents",
             "inscriptions",
+            "sanctions",
+            "username",
+            "initial_password",
         ]
 
     def create(self, validated_data):

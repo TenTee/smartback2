@@ -7,6 +7,8 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
     etudiant_matricule = serializers.CharField(source="etudiant.matricule", read_only=True)
     filiere_nom = serializers.CharField(source="etudiant.filiere.intitule", read_only=True)
     module_nom = serializers.CharField(source="module.nom", read_only=True)
+    parent_nom = serializers.CharField(source="etudiant.nom_parent", read_only=True)
+    parent_whatsapp = serializers.CharField(source="etudiant.whatsapp_parent", read_only=True)
 
     class Meta:
         model = AssiduiteRecord
@@ -23,6 +25,8 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
             "minutes_retard",
             "justifie",
             "justificatif",
+            "parent_nom",
+            "parent_whatsapp",
             "created_at",
         ]
 

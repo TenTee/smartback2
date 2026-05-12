@@ -7,6 +7,7 @@ from .models import Note, Etudiant, Module
 from etudiants.models import Inscription
 from academique.models import Filiere, Niveau, CourseAssignment, Evaluation, Classe
 from .serializers import NoteSerializer, NoteSummarySerializer, NoteFiliereSerializer
+from academique.middleware import get_current_academic_year_id
 
 
 class NoteViewSet(viewsets.ModelViewSet):
@@ -15,13 +16,60 @@ class NoteViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+        
+        # Filtre global par année académique
+        year_id = get_current_academic_year_id()
+        if year_id:
+            queryset = queryset.filter(classe__annee_academique_id=year_id)
+
         classe_id = self.request.query_params.get("classe")
         evaluation_id = self.request.query_params.get("evaluation")
+        
+        # Filtre automatique si c'est un étudiant qui demande ses propres notes
+        if self.request.user.is_authenticated and getattr(self.request.user, 'role', '') == 'etudiant':
+            etudiant = getattr(self.request.user, 'etudiant_profile', None)
+            if etudiant:
+                queryset = queryset.filter(etudiant=etudiant)
+
         if classe_id:
             queryset = queryset.filter(classe_id=classe_id)
         if evaluation_id:
             queryset = queryset.filter(evaluation_id=evaluation_id)
         return queryset
+
+    @action(detail=False, methods=["get"], url_path="me")
+    def me(self, request):
+        """Récupère les notes de l'étudiant connecté."""
+        etudiant = getattr(request.user, 'etudiant_profile', None)
+        if not etudiant:
+            return Response({"error": "Profil étudiant introuvable"}, status=404)
+
+        session = request.query_params.get("session")
+        notes = Note.objects.filter(etudiant=etudiant)
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            notes = notes.filter(classe__annee_academique_id=year_id)
+
+        if session:
+            notes = notes.filter(session=session)
+        
+        notes = notes.select_related("module")
+        
+        data = []
+        for note in notes:
+            data.append({
+                "id": note.id,
+                "module_nom": note.module.nom,
+                "session": note.session,
+                "note_cc": note.note_cc,
+                "note_sn": note.note_sn,
+                "note_rattrapage": note.note_rattrapage,
+                "note_finale": note.note_finale,
+                "coefficient": getattr(note.module, 'coefficient', 1),
+                "credits": getattr(note.module, 'credits', 0),
+            })
+        return Response(data)
 
     def get_serializer_class(self):
         if self.action == "list" and self.request.query_params.get("summary") == "true":
@@ -31,7 +79,15 @@ class NoteViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         if request.query_params.get("summary") == "true":
             notes = (
-                Note.objects.values(
+                Note.objects
+            )
+            
+            year_id = get_current_academic_year_id()
+            if year_id:
+                notes = notes.filter(classe__annee_academique_id=year_id)
+
+            notes = (
+                notes.values(
                     "etudiant_id",
                     "etudiant__nom",
                     "etudiant__matricule",

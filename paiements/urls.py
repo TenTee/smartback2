@@ -9,9 +9,11 @@ from .views import (
     PaymentAlertListView,
     StudentPaymentPlanDetailView,
     StudentPaymentPlanListCreateView,
+    MePaiementSummary,
 )
 
 urlpatterns = [
+    path("paiements/me/", MePaiementSummary.as_view(), name="paiement-me"),
     path("paiements/", PaiementListCreate.as_view(), name="paiement-list"),
     path("paiements/<int:pk>/", PaiementDetail.as_view(), name="paiement-detail"),
     path("paiements/aggregated/", PaiementAggregated.as_view(), name="paiement-aggregated"),

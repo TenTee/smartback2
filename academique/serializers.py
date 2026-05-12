@@ -568,6 +568,8 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "statut",
             "bulletin",
             "message",
+            "nom_parent",
+            "whatsapp_parent",
             "created_at",
             "updated_at",
         ]

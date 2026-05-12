@@ -19,6 +19,7 @@ from etudiants.models import Etudiant, Inscription
 from modules.models import Module
 from notes.models import Note
 from paiements.models import Frais, Paiement
+from .middleware import get_current_academic_year_id
 
 from .models import (
     Affectation,
@@ -61,6 +62,33 @@ from .serializers import (
 class OptimizedModelViewSet(viewsets.ModelViewSet):
     search_fields = ()
     ordering_fields = "__all__"
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        year_id = get_current_academic_year_id()
+        
+        if not year_id:
+            return queryset
+
+        # Mapping des champs pour filtrer par année académique selon le modèle
+        model = self.queryset.model
+        model_name = model.__name__
+        
+        # 1. Filtre direct
+        if hasattr(model, 'annee_academique_id') and not model_name == "Inscription":
+            queryset = queryset.filter(annee_academique_id=year_id)
+        elif hasattr(model, 'annee_academique_ref_id'):
+            queryset = queryset.filter(annee_academique_ref_id=year_id)
+            
+        # 2. Filtre via relation (Classe)
+        elif hasattr(model, 'classe_id'):
+            queryset = queryset.filter(classe__annee_academique_id=year_id)
+            
+        # 3. Cas spécifiques (Paiement)
+        elif model_name == "Paiement":
+            queryset = queryset.filter(frais__classe__annee_academique_id=year_id)
+            
+        return queryset
 
 
 class ParametresGlobauxViewSet(viewsets.ModelViewSet):
@@ -330,6 +358,12 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
     queryset = PreInscription.objects.select_related("filiere_souhaitee", "cycle_souhaite", "niveau_souhaite").all()
     serializer_class = PreInscriptionSerializer
     filterset_fields = ("statut", "filiere_souhaitee", "cycle_souhaite", "niveau_souhaite")
+    
+    def get_queryset(self):
+        # Pour les pré-inscriptions, on filtre par année académique si souhaité
+        # (Elles n'ont pas de lien direct dans le modèle actuel, on pourrait en ajouter un plus tard)
+        return super().get_queryset()
+
     search_fields = ("nom_candidat", "prenom_candidat", "email", "telephone")
     ordering = ("-created_at",)
 

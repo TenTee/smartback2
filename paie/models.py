@@ -1,6 +1,26 @@
 from django.db import models
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
+from django.apps import apps
+from django.utils import timezone
+
+class ParametresPaie(models.Model):
+    """
+    Singleton pour configurer le jour de paie.
+    """
+    jour_de_paie = models.PositiveIntegerField(default=25, help_text="Jour du mois pour la paie (1-31)")
+
+    class Meta:
+        verbose_name = "Paramètres de Paie"
+        verbose_name_plural = "Paramètres de Paie"
+
+    def save(self, *args, **kwargs):
+        if not self.pk and ParametresPaie.objects.exists():
+            return
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Jour de paie : le {self.jour_de_paie}"
 
 class Paie(models.Model):
     STATUTS = [
@@ -29,15 +49,37 @@ class Paie(models.Model):
         blank=True
     )
 
-
     def save(self, *args, **kwargs):
-        # ✅ Si un bénéficiaire est sélectionné, on récupère son salaire automatiquement
-        if self.beneficiaire and hasattr(self.beneficiaire, "salaire"):
+        is_new = self.pk is None
+        old_statut = None
+        if not is_new:
+            old_statut = Paie.objects.get(pk=self.pk).statut
+
+        # ✅ Récupération automatique du salaire
+        if self.beneficiaire and hasattr(self.beneficiaire, "salaire") and not self.salaire:
             self.salaire = self.beneficiaire.salaire
-        # ✅ Si aucun salaire n'est défini, on met 0 par défaut
+        
         if self.salaire is None:
             self.salaire = 0
+
         super().save(*args, **kwargs)
+
+        # ✅ Intégration Trésorerie : Création d'une dépense si statut passe à "Payé"
+        if self.statut == "Payé" and (is_new or old_statut != "Payé"):
+            try:
+                Depense = apps.get_model('depenses', 'Depense')
+                beneficiaire_nom = self.beneficiaire.nom if self.beneficiaire else "Inconnu"
+                Depense.objects.create(
+                    libelle=f"Salaire - {beneficiaire_nom} ({self.date.strftime('%B %Y')})",
+                    montant=self.salaire,
+                    categorie="Autres", # Ou une catégorie "Salaires" si elle existe
+                    date_depense=timezone.now().date(),
+                    statut="Validée",
+                    responsable_content_type=self.beneficiaire_content_type,
+                    responsable_object_id=self.beneficiaire_object_id
+                )
+            except Exception as e:
+                print(f"Erreur lors de la création de la dépense : {e}")
 
     def __str__(self):
         if self.beneficiaire:

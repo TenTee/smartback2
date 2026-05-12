@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from etudiants.models import Etudiant
+from academique.middleware import get_current_academic_year_id
 
 from .models import (
     FilierePaymentPolicy,
@@ -29,6 +30,11 @@ class PaiementListCreate(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = Paiement.objects.select_related("etudiant", "filiere", "frais", "frais__classe").all()
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            queryset = queryset.filter(frais__classe__annee_academique_id=year_id)
+
         etudiant_id = self.request.query_params.get("etudiant")
         frais_id = self.request.query_params.get("frais")
         if etudiant_id:
@@ -46,6 +52,11 @@ class PaiementDetail(generics.RetrieveUpdateDestroyAPIView):
 class PaiementAggregated(APIView):
     def get(self, request):
         etudiants = Etudiant.objects.select_related("filiere").prefetch_related("inscriptions", "inscriptions__classe")
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            etudiants = etudiants.filter(inscriptions__annee_academique_ref_id=year_id).distinct()
+
         results = []
         for etudiant in etudiants:
             # Récupérer l'inscription active (la plus récente)
@@ -124,6 +135,12 @@ class StudentPaymentPlanListCreateView(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = StudentPaymentPlan.objects.select_related("etudiant", "filiere", "policy").prefetch_related("installments").all()
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            # Plans don't have year directly, but we can filter via etudiant inscriptions
+            queryset = queryset.filter(etudiant__inscriptions__annee_academique_ref_id=year_id).distinct()
+
         etudiant_id = self.request.query_params.get("etudiant")
         filiere_id = self.request.query_params.get("filiere")
         status_value = self.request.query_params.get("status")
@@ -148,6 +165,11 @@ class PaymentAlertListView(APIView):
         filiere_id = request.query_params.get("filiere")
 
         installments = StudentPaymentInstallment.objects.select_related("plan", "plan__etudiant", "plan__filiere").all()
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            installments = installments.filter(plan__etudiant__inscriptions__annee_academique_ref_id=year_id).distinct()
+
         if etudiant_id:
             installments = installments.filter(plan__etudiant_id=etudiant_id)
         if filiere_id:
@@ -192,3 +214,74 @@ class PaymentAlertListView(APIView):
 
         serializer = PaymentAlertSerializer(alerts, many=True)
         return Response(serializer.data)
+
+from rest_framework.permissions import AllowAny
+from rest_framework import status
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+class MePaiementSummary(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [AllowAny]
+    """
+    Retourne un résumé financier pour l'étudiant connecté.
+    """
+    def get(self, request):
+        if not request.user or not request.user.is_authenticated:
+            return Response({"error": "Authentification requise"}, status=status.HTTP_401_UNAUTHORIZED)
+            
+        etudiant = getattr(request.user, 'etudiant_profile', None)
+        if not etudiant:
+            return Response({"error": "Profil étudiant introuvable"}, status=404)
+
+        year_id = get_current_academic_year_id()
+        if year_id:
+            derniere_inscription = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
+        else:
+            derniere_inscription = etudiant.inscriptions.order_by("-date_inscription").first()
+            
+        classe = derniere_inscription.classe if derniere_inscription else None
+        
+        montant_du_inscription = Decimal("0")
+        montant_du_formation = Decimal("0")
+        if classe:
+            frais_classe = Frais.objects.filter(classe=classe)
+            montant_du_inscription = frais_classe.filter(libelle__icontains="inscription").aggregate(
+                total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
+            )["total"]
+            montant_du_formation = frais_classe.exclude(libelle__icontains="inscription").aggregate(
+                total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
+            )["total"]
+        
+        paiements = Paiement.objects.filter(etudiant=etudiant)
+        montant_paye_inscription = paiements.filter(paiement_type="INSCRIPTION").aggregate(
+            total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
+        )["total"]
+        montant_paye_formation = paiements.filter(paiement_type="FORMATION").aggregate(
+            total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
+        )["total"]
+
+        plan = StudentPaymentPlan.objects.filter(etudiant=etudiant).first()
+        installments = []
+        if plan:
+            for inst in plan.installments.all():
+                installments.append({
+                    "label": inst.label,
+                    "due_date": inst.due_date,
+                    "amount_due": inst.amount_due,
+                    "amount_paid": inst.amount_paid,
+                    "status": inst.status
+                })
+
+        return Response({
+            "inscription": {
+                "du": float(montant_du_inscription),
+                "paye": float(montant_paye_inscription),
+                "reste": float(montant_du_inscription - montant_paye_inscription)
+            },
+            "formation": {
+                "du": float(montant_du_formation),
+                "paye": float(montant_paye_formation),
+                "reste": float(montant_du_formation - montant_paye_formation)
+            },
+            "echeances": installments
+        })

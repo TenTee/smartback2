@@ -50,5 +50,7 @@ class UserViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+from rest_framework.permissions import AllowAny
 class MyTokenObtainPairView(TokenObtainPairView):
+    permission_classes = [AllowAny]
     serializer_class = MyTokenObtainPairSerializer

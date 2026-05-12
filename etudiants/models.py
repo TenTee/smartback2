@@ -18,6 +18,13 @@ class Etudiant(models.Model):
     filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="etudiants")
     statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='Pré-inscrit')
     
+    nom_parent = models.CharField(max_length=150, blank=True, verbose_name="Nom du parent")
+    whatsapp_parent = models.CharField(max_length=20, blank=True, verbose_name="WhatsApp du parent")
+
+    # Lien vers le compte utilisateur pour le portail étudiant
+    user = models.OneToOneField("users.CustomUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="etudiant_profile")
+    initial_password = models.CharField(max_length=128, blank=True, null=True) # Visible uniquement par l'admin au début
+    
     def save(self, *args, **kwargs):
         # Génération automatique du matricule
         if not self.matricule:
@@ -98,3 +105,21 @@ class EtudiantDocument(models.Model):
 
     def __str__(self):
         return f"{self.etudiant.nom} - {self.type_document or 'Document'}"
+
+
+class SanctionDisciplinaire(models.Model):
+    TYPE_CHOICES = (
+        ('Avertissement', 'Avertissement'),
+        ('Blâme', 'Blâme'),
+        ('Exclusion temporaire', 'Exclusion temporaire'),
+        ('Exclusion définitive', 'Exclusion définitive'),
+    )
+    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name="sanctions")
+    type_sanction = models.CharField(max_length=50, choices=TYPE_CHOICES)
+    motif = models.TextField()
+    date_sanction = models.DateField(default=timezone.now)
+    duree = models.CharField(max_length=50, blank=True, null=True, help_text="Ex: 3 jours")
+    active = models.BooleanField(default=True)
+    
+    def __str__(self):
+        return f"{self.etudiant.nom} - {self.type_sanction} ({self.date_sanction})"

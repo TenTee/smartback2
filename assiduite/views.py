@@ -1,6 +1,7 @@
 from rest_framework import viewsets
 from .models import AssiduiteRecord
 from .serializers import AssiduiteRecordSerializer
+from academique.middleware import get_current_academic_year_id
 
 
 class AssiduiteRecordViewSet(viewsets.ModelViewSet):
@@ -8,7 +9,20 @@ class AssiduiteRecordViewSet(viewsets.ModelViewSet):
     queryset = AssiduiteRecord.objects.all()
 
     def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return AssiduiteRecord.objects.none()
+
         queryset = AssiduiteRecord.objects.all()
+        
+        year_id = get_current_academic_year_id()
+        if year_id:
+            queryset = queryset.filter(etudiant__inscriptions__annee_academique_ref_id=year_id)
+        
+        # Si c'est un étudiant, on restreint à ses propres records
+        if hasattr(user, 'etudiant_profile'):
+            queryset = queryset.filter(etudiant=user.etudiant_profile)
+
         params = self.request.query_params
 
         etudiant_id = params.get("etudiant")

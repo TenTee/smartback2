@@ -2,6 +2,37 @@ from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from .models import Etudiant, Inscription
 from notes.models import Note
+from users.models import CustomUser
+
+@receiver(post_save, sender=Etudiant)
+def create_user_for_etudiant(sender, instance, created, **kwargs):
+    """
+    ✅ Lorsqu'un étudiant est créé :
+    - Création automatique d'un compte utilisateur (CustomUser)
+    - Association du compte à l'étudiant
+    - Stockage du mot de passe initial pour l'administrateur
+    """
+    if created and not instance.user:
+        # Extraire nom et prénom (simplifié)
+        parts = instance.nom.split(' ', 1)
+        nom = parts[0]
+        prenom = parts[1] if len(parts) > 1 else ""
+
+        # Création de l'utilisateur
+        user = CustomUser.objects.create(
+            noms=nom,
+            prenoms=prenom,
+            email=instance.email,
+            role="etudiant" # Rôle spécifique
+        )
+        
+        # Récupération du mot de passe brut (généré dans le save() de CustomUser)
+        raw_password = getattr(user, '_raw_password', None)
+        
+        # Mise à jour de l'étudiant
+        instance.user = user
+        instance.initial_password = raw_password
+        instance.save(update_fields=['user', 'initial_password'])
 
 @receiver(post_save, sender=Inscription)
 def create_or_update_notes_on_inscription(sender, instance, created, **kwargs):

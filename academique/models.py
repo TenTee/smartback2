@@ -351,6 +351,8 @@ class PreInscription(NamedDescriptionModel):
     statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default="EN_ATTENTE")
     bulletin = models.FileField(upload_to="pre_inscriptions/bulletins/", null=True, blank=True)
     message = models.TextField(blank=True)
+    nom_parent = models.CharField(max_length=150, blank=True, verbose_name="Nom du parent")
+    whatsapp_parent = models.CharField(max_length=20, blank=True, verbose_name="WhatsApp du parent")
 
     class Meta:
         ordering = ["-created_at"]
