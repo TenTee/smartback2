@@ -11,6 +11,8 @@ from .views import (
     ValiderInscriptionView,
     MeEtudiantView,
     StudentPortalViewSet,
+    StudentSituationView,
+    StudentHistoryView,
 )
 
 router = DefaultRouter()
@@ -18,6 +20,8 @@ router.register(r'etudiants/portal', StudentPortalViewSet, basename='student-por
 
 urlpatterns = [
     path("etudiants/me/", MeEtudiantView.as_view(), name="etudiant-me"),
+    path("etudiants/me/situation/", StudentSituationView.as_view(), name="etudiant-me-situation"),
+    path("etudiants/me/history/", StudentHistoryView.as_view(), name="etudiant-me-history"),
     path("etudiants/", EtudiantListCreateView.as_view(), name="etudiant-list-create"),
     path("etudiants/<int:pk>/", EtudiantRetrieveUpdateDeleteView.as_view(), name="etudiant-detail"),
     path("etudiants/<int:pk>/export-documents/", ExportEtudiantDocumentsView.as_view(), name="etudiant-export-documents"),

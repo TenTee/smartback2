@@ -10,6 +10,7 @@ from .models import (
     Affectation,
     AnneeAcademique,
     Classe,
+    ConfigurationEtablissement,
     CourseAssignment,
     Cycle,
     CycleGlobal,
@@ -35,6 +36,12 @@ class ParametresGlobauxSerializer(serializers.ModelSerializer):
         if cc + sn != 100:
             raise serializers.ValidationError("La somme de CC et SN doit être exactement 100%.")
         return attrs
+
+
+class ConfigurationEtablissementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfigurationEtablissement
+        fields = "__all__"
 
 
 class CycleGlobalSerializer(serializers.ModelSerializer):

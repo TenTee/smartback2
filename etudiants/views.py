@@ -13,6 +13,7 @@ from .models import Etudiant, EtudiantDocument, Inscription, SanctionDisciplinai
 from .serializers import EtudiantSerializer, EtudiantDocumentSerializer, InscriptionSerializer
 from academique.models import CourseAssignment
 from academique.middleware import get_current_academic_year_id
+from .views_situation import StudentSituationView, StudentHistoryView
 
 
 # Liste + création

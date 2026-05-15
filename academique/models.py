@@ -1,4 +1,6 @@
+# pyrefly: ignore [missing-import]
 from django.core.exceptions import ValidationError
+# pyrefly: ignore [missing-import]
 from django.db import models
 
 from formateurs.models import Formateur
@@ -46,6 +48,39 @@ class ParametresGlobaux(TimeStampedModel):
     def get_parametres(cls):
         obj, _ = cls.objects.get_or_create(id=1, defaults={"pourcentage_cc": 30, "pourcentage_sn": 70})
         return obj
+
+
+class ConfigurationEtablissement(TimeStampedModel):
+    nom = models.CharField(max_length=255, default="SmartCampus")
+    logo = models.ImageField(upload_to="etablissement/logos/", null=True, blank=True)
+    adresse = models.TextField(blank=True)
+    ville = models.CharField(max_length=100, blank=True)
+    telephone = models.CharField(max_length=50, blank=True)
+    email = models.EmailField(blank=True)
+    site_web = models.URLField(blank=True)
+    
+    # Apparence
+    couleur_primaire = models.CharField(max_length=20, default="#193A7F")
+    couleur_secondaire = models.CharField(max_length=20, default="#2A52A1")
+    couleur_texte = models.CharField(max_length=20, default="#333333", blank=True)
+    typographie = models.CharField(max_length=100, default="'Inter', sans-serif")
+
+    # Direction
+    nom_directeur = models.CharField(max_length=255, blank=True)
+    titre_directeur = models.CharField(max_length=255, blank=True, default="Le Directeur Général")
+    signature_directeur = models.ImageField(upload_to="etablissement/signatures/", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Configuration de l'Établissement"
+        verbose_name_plural = "Configuration de l'Établissement"
+
+    @classmethod
+    def get_config(cls):
+        obj, _ = cls.objects.get_or_create(id=1)
+        return obj
+
+    def __str__(self):
+        return self.nom
 
 
 class UniversiteTutelle(NamedDescriptionModel):

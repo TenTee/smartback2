@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.utils.http import content_disposition_header
 from django.utils.text import get_valid_filename
 from openpyxl.styles import Font
-from rest_framework import status, viewsets
+from rest_framework import status, viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -25,6 +25,7 @@ from .models import (
     Affectation,
     AnneeAcademique,
     Classe,
+    ConfigurationEtablissement,
     Cycle,
     CycleGlobal,
     Departement,
@@ -44,6 +45,7 @@ from .serializers import (
     AffectationSerializer,
     AnneeAcademiqueSerializer,
     ClasseSerializer,
+    ConfigurationEtablissementSerializer,
     CourseSerializer,
     CycleSerializer,
     CycleGlobalSerializer,
@@ -103,6 +105,27 @@ class ParametresGlobauxViewSet(viewsets.ModelViewSet):
         # Assure qu'on retourne au moins un objet s'il n'y en a pas
         ParametresGlobaux.get_parametres()
         return ParametresGlobaux.objects.all()
+
+
+class ConfigurationEtablissementViewSet(viewsets.ModelViewSet):
+    queryset = ConfigurationEtablissement.objects.all()
+    serializer_class = ConfigurationEtablissementSerializer
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve', 'current']:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
+    def get_queryset(self):
+        # Assure qu'on retourne au moins un objet
+        ConfigurationEtablissement.get_config()
+        return ConfigurationEtablissement.objects.all()
+
+    @action(detail=False, methods=["get"], url_path="current")
+    def current(self, request):
+        config = ConfigurationEtablissement.get_config()
+        serializer = self.get_serializer(config)
+        return Response(serializer.data)
 
 
 class UniversiteTutelleViewSet(OptimizedModelViewSet):

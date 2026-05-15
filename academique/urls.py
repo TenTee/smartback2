@@ -9,6 +9,7 @@ from .views import (
     AffectationViewSet,
     AnneeAcademiqueViewSet,
     ClasseViewSet,
+    ConfigurationEtablissementViewSet,
     CourseViewSet,
     CycleViewSet,
     CycleGlobalViewSet,
@@ -25,6 +26,7 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r"parametres-globaux", ParametresGlobauxViewSet, basename="academique-parametres-globaux")
+router.register(r"configuration-etablissement", ConfigurationEtablissementViewSet, basename="academique-configuration-etablissement")
 router.register(r"universites-tutelles", UniversiteTutelleViewSet, basename="academique-universite-tutelle")
 router.register(r"departements", DepartementViewSet, basename="academique-departement")
 router.register(r"filieres", FiliereViewSet, basename="academique-filiere")
