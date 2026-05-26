@@ -4,7 +4,9 @@ from decimal import Decimal
 
 import openpyxl
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse
+from django.conf import settings
+import os
 from django.utils import timezone
 from django.utils.http import content_disposition_header
 from django.utils.text import get_valid_filename
@@ -29,6 +31,7 @@ from .models import (
     Cycle,
     CycleGlobal,
     Departement,
+    Epreuve,
     Evaluation,
     Filiere,
     Niveau,
@@ -50,6 +53,7 @@ from .serializers import (
     CycleSerializer,
     CycleGlobalSerializer,
     DepartementSerializer,
+    EpreuveSerializer,
     EvaluationSerializer,
     FiliereSerializer,
     FraisSerializer,
@@ -396,108 +400,61 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
         try:
             with transaction.atomic():
                 preinscription.statut = "APPROUVEE"
-                preinscription.save(update_fields=["statut", "updated_at"])
-                
-                # Extraire les montants payés à l'inscription et la classe choisie
-                montant_inscription = request.data.get("montant_inscription_verse", "0")
-                montant_formation = request.data.get("montant_formation_verse", "0")
-                classe_id = request.data.get("classe_id")
-                
-                self._create_etudiant_and_inscription(
-                    preinscription, 
-                    montant_inscription=Decimal(montant_inscription),
-                    montant_formation=Decimal(montant_formation),
-                    classe_id=classe_id
-                )
-            return Response({"message": "Pré-inscription approuvée et étudiant créé."})
-        except Exception as e:
+                preinscription.save()
+                return Response({"message": "Pré-inscription approuvée."})
+        except Exception:
             traceback.print_exc()
-            return Response(
-                {"error": str(e), "traceback": traceback.format_exc()},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"error": "Impossible d'approuver"}, status=500)
 
-    @action(detail=True, methods=["post"], url_path="reject")
-    def reject(self, request, pk=None):
-        preinscription = self.get_object()
-        preinscription.statut = "REJETEE"
-        preinscription.save(update_fields=["statut", "updated_at"])
-        return Response({"message": "Pré-inscription rejetée."})
+class EpreuveViewSet(OptimizedModelViewSet):
+    queryset = Epreuve.objects.select_related(
+        "filiere", "niveau", "module", "annee_academique", "semestre"
+    ).all()
+    serializer_class = EpreuveSerializer
+    filterset_fields = ("filiere", "niveau", "module", "annee_academique", "semestre", "type_epreuve", "est_partage")
+    search_fields = ("nom", "auteur", "module__nom", "filiere__nom")
+    ordering = ("-annee_academique__libelle", "filiere__nom", "module__nom", "nom")
 
-    def _create_etudiant_and_inscription(self, preinscription, montant_inscription=0, montant_formation=0, classe_id=None):
-        if not preinscription.filiere_souhaitee_id:
-            raise ValidationError("La filière souhaitée est obligatoire pour approuver l'inscription.")
+    def get_parsers(self):
+        """Support multipart (file upload) + JSON."""
+        from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+        return [MultiPartParser(), FormParser(), JSONParser()]
 
-        annee = AnneeAcademique.objects.filter(est_active=True).order_by("-libelle").first()
-        annee_libelle = annee.libelle if annee else str(timezone.now().year)
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        # Portail étudiant: si le paramètre student_view est présent, filtrer uniquement les épreuves partagées
+        if self.request.query_params.get('student_view') == 'true':
+            queryset = queryset.filter(est_partage=True)
+        return queryset
 
-        # 1. Créer ou récupérer l'étudiant
-        etudiant, created = Etudiant.objects.get_or_create(
-            email=preinscription.email,
-            defaults={
-                "nom": f"{preinscription.nom_candidat} {preinscription.prenom_candidat}".strip(),
-                "contact": preinscription.telephone,
-                "filiere": preinscription.filiere_souhaitee,
-                "statut": "Inscrit",
-            },
-        )
+    @action(detail=True, methods=['get'], url_path='download-sujet')
+    def download_sujet(self, request, pk=None):
+        epreuve = self.get_object()
+        if not epreuve.fichier:
+            return Response({"detail": "Sujet non trouvé."}, status=404)
+        # Try to serve from local storage
+        try:
+            file_path = epreuve.fichier.path
+            filename = get_valid_filename(os.path.basename(epreuve.fichier.name))
+            return FileResponse(open(file_path, 'rb'), as_attachment=True, filename=filename)
+        except Exception:
+            # Fallback: redirect to storage URL if available
+            try:
+                return HttpResponse(status=302, headers={'Location': epreuve.fichier.url})
+            except Exception:
+                return Response({"detail": "Impossible de récupérer le fichier."}, status=500)
 
-        # 2. Créer l'inscription si un niveau est souhaité
-        inscription = None
-        if preinscription.niveau_souhaite_id:
-            # Recherche automatique de la classe correspondante pour l'année active
-            classe_auto = None
-            if not classe_id:
-                from academique.models import Classe
-                classe_auto = Classe.objects.filter(
-                    filiere=preinscription.filiere_souhaitee,
-                    niveau=preinscription.niveau_souhaite,
-                    annee_academique=annee
-                ).first()
-            
-            inscription, _ = Inscription.objects.get_or_create(
-                etudiant=etudiant,
-                niveau=preinscription.niveau_souhaite,
-                annee_academique=annee_libelle,
-                defaults={"annee_academique_ref": annee, "classe_id": classe_id or (classe_auto.id if classe_auto else None)},
-            )
-            # Si déjà existante mais classe_id passée ou détectée, on met à jour
-            final_classe_id = classe_id or (classe_auto.id if classe_auto else None)
-            if inscription and final_classe_id and not inscription.classe_id:
-                inscription.classe_id = final_classe_id
-                inscription.save()
-
-        # 3. Gérer les paiements initiaux
-        if inscription and inscription.classe:
-            from paiements.models import Frais, Paiement
-            
-            # Paiement des frais d'inscription
-            if montant_inscription > 0:
-                frais_ins = Frais.objects.filter(
-                    classe=inscription.classe, 
-                    libelle__icontains="inscription"
-                ).first()
-                if frais_ins:
-                    Paiement.objects.create(
-                        etudiant=etudiant,
-                        frais=frais_ins,
-                        paiement_type="INSCRIPTION",
-                        montant_paye=montant_inscription,
-                        moyen_paiement="cash" # Par défaut
-                    )
-
-            # Paiement (avance) sur frais de formation
-            if montant_formation > 0:
-                # On cherche la première tranche (souvent "Scolarité" ou "Tranche 1")
-                frais_form = Frais.objects.filter(
-                    classe=inscription.classe
-                ).exclude(libelle__icontains="inscription").order_by("id").first()
-                
-                if frais_form:
-                    Paiement.objects.create(
-                        etudiant=etudiant,
-                        frais=frais_form,
-                        paiement_type="FORMATION",
-                        montant_paye=montant_formation,
-                        moyen_paiement="cash"
-                    )
+    @action(detail=True, methods=['get'], url_path='download-corrige')
+    def download_corrige(self, request, pk=None):
+        epreuve = self.get_object()
+        if not epreuve.corrige:
+            return Response({"detail": "Corrigé non trouvé."}, status=404)
+        try:
+            file_path = epreuve.corrige.path
+            filename = get_valid_filename(os.path.basename(epreuve.corrige.name))
+            return FileResponse(open(file_path, 'rb'), as_attachment=True, filename=filename)
+        except Exception:
+            try:
+                return HttpResponse(status=302, headers={'Location': epreuve.corrige.url})
+            except Exception:
+                return Response({"detail": "Impossible de récupérer le fichier."}, status=500)

@@ -14,6 +14,7 @@ from .views import (
     CycleViewSet,
     CycleGlobalViewSet,
     DepartementViewSet,
+    EpreuveViewSet,
     EvaluationViewSet,
     FiliereViewSet,
     FraisViewSet,
@@ -45,6 +46,7 @@ router.register(r"frais", FraisViewSet, basename="academique-frais")
 router.register(r"paiements", AcademicPaiementViewSet, basename="academique-paiement")
 router.register(r"emplois-du-temps", AcademicEmploiDuTempsViewSet, basename="academique-emploi")
 router.register(r"pre-inscriptions", PreInscriptionViewSet, basename="academique-preinscription")
+router.register(r"epreuves", EpreuveViewSet, basename="academique-epreuve")
 
 # Alias de compatibilité
 router.register(r"facultes", UniversiteTutelleViewSet, basename="academique-faculte")

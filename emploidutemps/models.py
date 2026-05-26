@@ -5,6 +5,21 @@ from modules.models import Module
 from academique.models import Filiere, Niveau
 from django.core.exceptions import ValidationError
 
+class Salle(models.Model):
+    nom = models.CharField(max_length=100, unique=True)
+    capacite = models.PositiveIntegerField(null=True, blank=True)
+    description = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Salle"
+        verbose_name_plural = "Salles"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return self.nom
+
 class EmploiDuTemps(models.Model):
     filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, null=True, blank=True)
     niveau = models.ForeignKey(Niveau, on_delete=models.CASCADE, null=True, blank=True)
@@ -14,7 +29,7 @@ class EmploiDuTemps(models.Model):
     jour = models.CharField(max_length=20)
     heure_debut = models.TimeField()
     heure_fin = models.TimeField()
-    salle = models.CharField(max_length=100)
+    salle = models.ForeignKey(Salle, on_delete=models.CASCADE, related_name="emplois_du_temps")
 
     def clean(self):
         """Validation métier (admin/tests)."""

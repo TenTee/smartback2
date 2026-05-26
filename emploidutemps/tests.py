@@ -4,7 +4,7 @@ from datetime import time
 from formateurs.models import Formateur
 from modules.models import Module
 from academique.models import Filiere, Departement, UniversiteTutelle
-from emploidutemps.models import EmploiDuTemps
+from emploidutemps.models import EmploiDuTemps, Salle
 
 class EmploiDuTempsTests(TestCase):
     def setUp(self):
@@ -22,6 +22,11 @@ class EmploiDuTempsTests(TestCase):
         self.filiereA = Filiere.objects.create(nom="Filiere A", departement=self.dept)
         self.filiereB = Filiere.objects.create(nom="Filiere B", departement=self.dept)
 
+        # Création des salles
+        self.salle101 = Salle.objects.create(nom="Salle 101")
+        self.salle102 = Salle.objects.create(nom="Salle 102")
+        self.salle103 = Salle.objects.create(nom="Salle 103")
+
     def test_seance_creation(self):
         """Créer une séance dans Filiere A."""
         seance = EmploiDuTemps.objects.create(
@@ -31,7 +36,7 @@ class EmploiDuTempsTests(TestCase):
             jour="Lundi",
             heure_debut=time(9, 0),
             heure_fin=time(11, 0),
-            salle="Salle 101"
+            salle=self.salle101
         )
 
         # Vérifier que la séance existe dans Filiere A
@@ -49,7 +54,7 @@ class EmploiDuTempsTests(TestCase):
                 jour="Mardi",
                 heure_debut=time(12, 0),
                 heure_fin=time(12, 30),
-                salle="Salle 102"
+                salle=self.salle102
             )
             seance.clean()  # déclenche la validation
 
@@ -62,18 +67,20 @@ class EmploiDuTempsTests(TestCase):
             jour="Mercredi",
             heure_debut=time(10, 0),
             heure_fin=time(11, 0),
-            salle="Salle 103"
+            salle=self.salle103
         )
+
+        moduleB = Module.objects.create(nom="Physique")
 
         # Tentative de créer une autre séance dans la même salle et créneau
         with self.assertRaises(ValidationError):
             seance_conflict = EmploiDuTemps(
                 filiere=self.filiereB,
-                module=self.module,
+                module=moduleB,
                 formateur=self.formateur,
                 jour="Mercredi",
                 heure_debut=time(10, 30),
                 heure_fin=time(11, 30),
-                salle="Salle 103"
+                salle=self.salle103
             )
             seance_conflict.clean()

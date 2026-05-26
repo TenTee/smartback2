@@ -4,8 +4,15 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
-from .models import EmploiDuTemps
-from .serializers import EmploiDuTempsSerializer
+from .models import EmploiDuTemps, Salle
+from .serializers import EmploiDuTempsSerializer, SalleSerializer
+
+class SalleViewSet(viewsets.ModelViewSet):
+    queryset = Salle.objects.all()
+    serializer_class = SalleSerializer
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["nom", "description"]
+    ordering_fields = ["nom"]
 
 class EmploiDuTempsViewSet(viewsets.ModelViewSet):
     queryset = EmploiDuTemps.objects.all()
@@ -14,7 +21,7 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
     # 🔎 Ajout de filtres et recherche
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["jour", "filiere", "niveau", "classe", "formateur", "module", "salle"]
-    search_fields = ["salle", "filiere__nom", "formateur__nom", "module__nom"]
+    search_fields = ["salle__nom", "filiere__nom", "formateur__nom", "module__nom"]
     ordering_fields = ["heure_debut", "heure_fin"]
 
     @action(detail=False, methods=["get"], url_path="me")

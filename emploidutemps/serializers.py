@@ -1,7 +1,12 @@
 from rest_framework import serializers
 from datetime import time
-from .models import EmploiDuTemps
+from .models import EmploiDuTemps, Salle
 from academique.models import Filiere, Niveau
+
+class SalleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Salle
+        fields = "__all__"
 
 class EmploiDuTempsSerializer(serializers.ModelSerializer):
     filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
@@ -10,9 +15,11 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     module_nom = serializers.CharField(source="module.nom", read_only=True)
     formateur_nom = serializers.CharField(source="formateur.nom", read_only=True)
+    salle_nom = serializers.CharField(source="salle.nom", read_only=True)
 
     filiere = serializers.PrimaryKeyRelatedField(queryset=Filiere.objects.all(), required=False, allow_null=True)
     niveau = serializers.PrimaryKeyRelatedField(queryset=Niveau.objects.all(), required=False, allow_null=True)
+    salle = serializers.PrimaryKeyRelatedField(queryset=Salle.objects.all())
 
     class Meta:
         model = EmploiDuTemps

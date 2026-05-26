@@ -15,6 +15,7 @@ from .models import (
     Cycle,
     CycleGlobal,
     Departement,
+    Epreuve,
     Evaluation,
     Filiere,
     Niveau,
@@ -544,6 +545,7 @@ class AcademicEmploiDuTempsSerializer(serializers.ModelSerializer):
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     module_nom = serializers.CharField(source="module.nom", read_only=True)
     formateur_nom = serializers.CharField(source="formateur.nom", read_only=True)
+    salle_nom = serializers.CharField(source="salle.nom", read_only=True)
 
     class Meta:
         model = EmploiDuTemps
@@ -588,4 +590,47 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "filiere_souhaitee_nom",
             "cycle_souhaite_nom",
             "niveau_souhaite_nom",
+        ]
+
+
+class EpreuveSerializer(serializers.ModelSerializer):
+    filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
+    niveau_nom = serializers.CharField(source="niveau.nom", read_only=True)
+    module_nom = serializers.CharField(source="module.nom", read_only=True)
+    annee_academique_libelle = serializers.CharField(source="annee_academique.libelle", read_only=True)
+    semestre_nom = serializers.CharField(source="semestre.nom", read_only=True, allow_null=True)
+
+    class Meta:
+        model = Epreuve
+        fields = [
+            "id",
+            "nom",
+            "description",
+            "filiere",
+            "filiere_nom",
+            "niveau",
+            "niveau_nom",
+            "module",
+            "module_nom",
+            "annee_academique",
+            "annee_academique_libelle",
+            "semestre",
+            "semestre_nom",
+            "type_epreuve",
+            "fichier",
+            "corrige",
+            "auteur",
+            "est_partage",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "updated_at",
+            "filiere_nom",
+            "niveau_nom",
+            "module_nom",
+            "annee_academique_libelle",
+            "semestre_nom",
         ]
