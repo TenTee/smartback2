@@ -17,19 +17,8 @@ from users.views import MyTokenObtainPairView
 
 def api_home(request):
     return JsonResponse({
-        "message": "Bienvenue sur SmartCampus API 🚀",
-        "endpoints": {
-            "auth": {
-                "register": "/api/auth/register/",
-                "login": "/api/auth/login/",
-                "logout": "/api/auth/logout/",
-                "dashboard": "/api/dashboard/"
-            },
-            "programs": "/api/programs/",
-            "files": "/api/files/upload/",
-            "notifications": "/api/notifications/",
-            "admin": "/admin/"
-        }
+        "message": "Bienvenue sur SmartCampus API ",
+        
     })
 
 urlpatterns = [
