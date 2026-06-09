@@ -154,6 +154,12 @@ class FiliereViewSet(OptimizedModelViewSet):
     search_fields = ("nom", "code", "description", "departement__nom")
     ordering = ("departement__nom", "nom")
 
+    def get_permissions(self):
+        # Allow public access to list/retrieve filieres and the nested cycles action
+        if self.action in ["list", "retrieve", "cycles"]:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
     @action(detail=True, methods=["get"], url_path="cycles")
     def cycles(self, request, pk=None):
         cycles = Cycle.objects.filter(filiere=self.get_object())
@@ -180,6 +186,12 @@ class CycleViewSet(OptimizedModelViewSet):
         serializer = LevelSerializer(self.get_object().niveaux.all(), many=True)
         return Response(serializer.data)
 
+    def get_permissions(self):
+        # Allow public access to list/retrieve cycles and the nested levels action
+        if self.action in ["list", "retrieve", "levels"]:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
 
 class LevelViewSet(OptimizedModelViewSet):
     queryset = Niveau.objects.select_related("cycle", "cycle__filiere").prefetch_related("modules").all()
@@ -187,6 +199,12 @@ class LevelViewSet(OptimizedModelViewSet):
     filterset_fields = ("cycle", "cycle__filiere")
     search_fields = ("nom", "cycle__nom", "cycle__filiere__nom")
     ordering = ("cycle__filiere__nom", "nom")
+
+    def get_permissions(self):
+        # Allow public access to list/retrieve levels
+        if self.action in ["list", "retrieve"]:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
 
 class CourseViewSet(OptimizedModelViewSet):
@@ -399,12 +417,77 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
         preinscription = self.get_object()
         try:
             with transaction.atomic():
+                # Mark as approved
                 preinscription.statut = "APPROUVEE"
                 preinscription.save()
-                return Response({"message": "Pré-inscription approuvée."})
+
+                # Synchroniser: créer ou lier l'Etudiant
+                # Vérifier la filière/niveau fournis
+                if not preinscription.filiere_souhaitee or not preinscription.niveau_souhaite:
+                    return Response({"error": "Filière ou niveau manquant sur la pré-inscription."}, status=400)
+
+                # Rechercher un étudiant existant par email
+                etudiant = Etudiant.objects.filter(email=preinscription.email).first()
+                if not etudiant:
+                    etudiant = Etudiant.objects.create(
+                        nom=f"{preinscription.nom_candidat} {preinscription.prenom_candidat}".strip(),
+                        contact=preinscription.telephone,
+                        email=preinscription.email,
+                        filiere=preinscription.filiere_souhaitee,
+                        nom_parent=preinscription.nom_parent or "",
+                        whatsapp_parent=preinscription.whatsapp_parent or "",
+                        statut="Inscrit",
+                    )
+                else:
+                    # Mettre à jour certaines infos si nécessaire
+                    etudiant.filiere = preinscription.filiere_souhaitee
+                    etudiant.nom_parent = preinscription.nom_parent or etudiant.nom_parent
+                    etudiant.whatsapp_parent = preinscription.whatsapp_parent or etudiant.whatsapp_parent
+                    etudiant.contact = preinscription.telephone or etudiant.contact
+                    etudiant.statut = "Inscrit"
+                    etudiant.save()
+
+                # Créer une inscription pour l'année académique courante
+                year = None
+                year_id = get_current_academic_year_id()
+                if year_id:
+                    try:
+                        year = AnneeAcademique.objects.filter(id=year_id).first()
+                    except Exception:
+                        year = None
+                if not year:
+                    year = AnneeAcademique.objects.filter(est_active=True).first()
+
+                annee_libelle = year.libelle if year else "(non défini)"
+
+                # Vérifier si une inscription similaire existe
+                existing_inscription = Inscription.objects.filter(
+                    etudiant=etudiant,
+                    niveau=preinscription.niveau_souhaite,
+                    annee_academique_ref=year if year else None,
+                ).first()
+
+                if not existing_inscription:
+                    inscription = Inscription.objects.create(
+                        etudiant=etudiant,
+                        niveau=preinscription.niveau_souhaite,
+                        annee_academique=annee_libelle,
+                        annee_academique_ref=year if year else None,
+                    )
+
+                return Response({
+                    "message": "Pré-inscription approuvée et synchronisée.",
+                    "etudiant_id": etudiant.id,
+                })
         except Exception:
             traceback.print_exc()
             return Response({"error": "Impossible d'approuver"}, status=500)
+
+    def get_permissions(self):
+        # Allow anonymous users to create pré-inscriptions (public form)
+        if self.action == "create":
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
 class EpreuveViewSet(OptimizedModelViewSet):
     queryset = Epreuve.objects.select_related(
