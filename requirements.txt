@@ -6,8 +6,12 @@ djangorestframework-simplejwt
 django-cors-headers
 django-filter
 drf-spectacular
+drf-spectacular-sidecar
 openpyxl
 celery
 redis
 pytest
 pytest-django
+Pillow
+dj-database-url
+psycopg2-binary
