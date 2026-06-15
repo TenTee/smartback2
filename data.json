@@ -1,0 +1,23 @@
+[
+{
+  "model": "users.customuser",
+  "fields": {
+    "last_login": null,
+    "is_superuser": true,
+    "first_name": "",
+    "last_name": "",
+    "is_staff": true,
+    "date_joined": "2026-06-10T11:23:01.252Z",
+    "noms": "",
+    "prenoms": "",
+    "email": "tentee@gmail.com",
+    "role": "responsableRh",
+    "username": "tentee",
+    "password": "pbkdf2_sha256$1000000$zGWpDvpzOhgIKYEle7zy4j$4XlwPfdv+0kMZTCWh5VTWp+icHrpFTny5qiFAPvu8xk=",
+    "is_active": true,
+    "date_created": "2026-06-10T11:23:02.020Z",
+    "groups": [],
+    "user_permissions": []
+  }
+}
+]

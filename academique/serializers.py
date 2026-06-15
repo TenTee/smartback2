@@ -134,6 +134,10 @@ class FiliereSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.Mode
     departement_nom = serializers.CharField(source="departement.nom", read_only=True)
     universite_tutelle_nom = serializers.CharField(source="departement.universite_tutelle.nom", read_only=True)
     name = serializers.CharField(source="nom", read_only=True)
+    # Affiche le nom du cycle (type de cycle) associé à la filière s'il y en a un
+    cycle_nom = serializers.SerializerMethodField()
+    # Nombre de niveaux créés sous cette filière
+    nombre_niveaux = serializers.SerializerMethodField()
 
     class Meta:
         model = Filiere
@@ -145,7 +149,10 @@ class FiliereSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.Mode
             "nom",
             "name",
             "code",
+            "responsable_nom",
             "description",
+            "cycle_nom",
+            "nombre_niveaux",
             "created_at",
             "updated_at",
         ]
@@ -156,7 +163,21 @@ class FiliereSerializer(CaseInsensitiveUniqueWithinParentMixin, serializers.Mode
             "departement_nom",
             "universite_tutelle_nom",
             "name",
+            "cycle_nom",
+            "nombre_niveaux",
         ]
+
+    def get_cycle_nom(self, obj):
+        """Retourne le nom du premier cycle de la filière (cycle principal)."""
+        cycle = obj.cycles.select_related("type_cycle").first()
+        if cycle:
+            return cycle.type_cycle.nom if cycle.type_cycle else cycle.nom
+        return None
+
+    def get_nombre_niveaux(self, obj):
+        """Retourne le nombre total de niveaux rattachés à cette filière."""
+        from .models import Niveau
+        return Niveau.objects.filter(cycle__filiere=obj).count()
 
     def validate(self, attrs):
         return self.validate_scoped_name(attrs)

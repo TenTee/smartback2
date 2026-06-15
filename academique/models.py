@@ -116,6 +116,7 @@ class Departement(NamedDescriptionModel):
 class Filiere(NamedDescriptionModel):
     departement = models.ForeignKey(Departement, on_delete=models.CASCADE, related_name="filieres")
     nom = models.CharField(max_length=200)
+    responsable_nom = models.CharField(max_length=255, blank=True)
     code = models.CharField(max_length=50, blank=True)
 
     class Meta:
@@ -431,34 +432,3 @@ class Epreuve(NamedDescriptionModel):
     def __str__(self):
         return f"{self.nom} - {self.module.nom} ({self.annee_academique.libelle})"
 
-
-class Epreuve(NamedDescriptionModel):
-    TYPE_CHOICES = [
-        ("DEVOIR", "Devoir"),
-        ("EXAMEN", "Examen"),
-        ("RATTRAPAGE", "Rattrapage"),
-        ("TP", "TP"),
-        ("AUTRE", "Autre"),
-    ]
-    
-    nom = models.CharField(max_length=255)
-    filiere = models.ForeignKey(Filiere, on_delete=models.CASCADE, related_name="epreuves")
-    niveau = models.ForeignKey(Niveau, on_delete=models.CASCADE, related_name="epreuves")
-    module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="epreuves")
-    annee_academique = models.ForeignKey(AnneeAcademique, on_delete=models.CASCADE, related_name="epreuves")
-    semestre = models.ForeignKey(Semestre, on_delete=models.SET_NULL, null=True, blank=True, related_name="epreuves")
-    type_epreuve = models.CharField(max_length=20, choices=TYPE_CHOICES, default="EXAMEN")
-    
-    # Fichiers
-    fichier = models.FileField(upload_to="epreuves/sujets/")
-    corrige = models.FileField(upload_to="epreuves/corriges/", null=True, blank=True, help_text="Corrigé ou barème optionnel")
-    
-    # Métadonnées et Droits d'Accès
-    auteur = models.CharField(max_length=150, blank=True, help_text="Nom de l'enseignant ou concepteur")
-    est_partage = models.BooleanField(default=True, help_text="Rendre visible par les étudiants")
-
-    class Meta:
-        ordering = ["-annee_academique__libelle", "filiere__nom", "niveau__nom", "module__nom", "nom"]
-
-    def __str__(self):
-        return f"{self.nom} - {self.module.nom} ({self.annee_academique.libelle})"

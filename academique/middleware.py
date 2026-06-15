@@ -26,4 +26,10 @@ class AcademicYearMiddleware:
         return response
 
 def get_current_academic_year_id():
-    return _current_academic_year_id.get()
+    val = _current_academic_year_id.get()
+    if not val:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None

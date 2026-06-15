@@ -160,6 +160,67 @@ class FiliereViewSet(OptimizedModelViewSet):
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]
 
+    def create(self, request, *args, **kwargs):
+        """
+        Extended create to optionally accept:
+        - `type_cycle`: id of CycleGlobal to create a Cycle for this filière
+        - `nombre_niveaux`: integer number of levels to create under the cycle
+        - `responsable_nom`: name of the responsible person (stored on Filiere)
+
+        When provided, this will create the Cycle, the requested Nombre de Niveaux
+        and for the current academic year will create corresponding Classe objects.
+        """
+        payload = request.data.copy()
+        type_cycle_id = payload.pop("type_cycle", None)
+        nombre_niveaux = payload.pop("nombre_niveaux", None)
+
+        with transaction.atomic():
+            serializer = self.get_serializer(data=payload)
+            serializer.is_valid(raise_exception=True)
+            filiere = serializer.save()
+
+            # If a cycle type is provided, create a Cycle and auto-create Niveaux/Classes
+            if type_cycle_id:
+                try:
+                    type_cycle = CycleGlobal.objects.get(pk=type_cycle_id)
+                except CycleGlobal.DoesNotExist:
+                    raise ValidationError({"type_cycle": "Type de cycle introuvable"})
+
+                # Create the Cycle and name it after the CycleGlobal
+                cycle = Cycle.objects.create(filiere=filiere, type_cycle=type_cycle, nom=type_cycle.nom, ordre=1)
+
+                try:
+                    levels = int(nombre_niveaux) if nombre_niveaux is not None else 0
+                except (ValueError, TypeError):
+                    levels = 0
+
+                year_id = get_current_academic_year_id()
+                annee = None
+                if year_id:
+                    annee = AnneeAcademique.objects.filter(id=year_id).first()
+                # Fallback to an active year or the latest available year if header not provided
+                if annee is None:
+                    annee = AnneeAcademique.objects.filter(est_active=True).first() or AnneeAcademique.objects.order_by('-id').first()
+
+                for i in range(1, levels + 1):
+                    # niveau names like "Licence 1", "Licence 2" etc.
+                    niveau_nom = f"{type_cycle.nom} {i}"
+                    niveau = Niveau.objects.create(cycle=cycle, nom=niveau_nom, ordre=i)
+
+                    if annee:
+                        # classe name like "Info Licence 1"
+                        classe_nom = f"{filiere.nom} {type_cycle.nom} {i}"
+                        Classe.objects.update_or_create(
+                            filiere=filiere,
+                            cycle=cycle,
+                            niveau=niveau,
+                            annee_academique=annee,
+                            defaults={"nom": classe_nom}
+                        )
+
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     @action(detail=True, methods=["get"], url_path="cycles")
     def cycles(self, request, pk=None):
         cycles = Cycle.objects.filter(filiere=self.get_object())
