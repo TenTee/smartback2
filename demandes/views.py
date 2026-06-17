@@ -18,11 +18,6 @@ class DemandeRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
     queryset = DemandeArticle.objects.all()
     serializer_class = DemandeSerializer
 
-  # demandes/views.py
-class DemandeRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = DemandeArticle.objects.all()
-    serializer_class = DemandeSerializer
-
     def update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return super().update(request, *args, **kwargs)

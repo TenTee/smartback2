@@ -21,7 +21,13 @@ class EtudiantListCreateView(generics.ListCreateAPIView):
     serializer_class = EtudiantSerializer
 
     def get_queryset(self):
-        queryset = Etudiant.objects.all()
+        queryset = Etudiant.objects.prefetch_related(
+            'inscriptions__classe',
+            'inscriptions__niveau',
+            'inscriptions__annee_academique_ref',
+            'documents',
+            'sanctions',
+        ).select_related('filiere', 'user')
         
         # Filtre global par année académique (via le header X-Academic-Year)
         year_id = get_current_academic_year_id()
@@ -56,7 +62,13 @@ class EtudiantListCreateView(generics.ListCreateAPIView):
 
 # Récupération + modification + suppression
 class EtudiantRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
-    queryset = Etudiant.objects.all()
+    queryset = Etudiant.objects.prefetch_related(
+        'inscriptions__classe',
+        'inscriptions__niveau',
+        'inscriptions__annee_academique_ref',
+        'documents',
+        'sanctions',
+    ).select_related('filiere', 'user')
     serializer_class = EtudiantSerializer
 
 

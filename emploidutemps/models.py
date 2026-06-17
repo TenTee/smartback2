@@ -39,8 +39,6 @@ class EmploiDuTemps(models.Model):
                 raise ValidationError("La classe fournie n'appartient pas à la filière sélectionnée.")
             if self.niveau_id and self.classe.niveau_id != self.niveau_id:
                 raise ValidationError("La classe fournie n'appartient pas au niveau sélectionné.")
-            if not self.classe.modules.filter(pk=self.module_id).exists():
-                raise ValidationError("Le module doit appartenir à la classe sélectionnée.")
 
         # 1️⃣ Bloquer la pause par cycle
         if self.classe_id and self.classe.cycle and self.classe.cycle.type_cycle:
@@ -77,18 +75,35 @@ class EmploiDuTemps(models.Model):
         if conflits_salle.exists():
             raise ValidationError("⚠️ Conflit de salle : cette salle est déjà occupée à ce créneau.")
 
-        # 3️⃣ Empêcher conflits globaux (hors tronc communs du même module)
-        conflits_horaire = EmploiDuTemps.objects.filter(
-            jour=self.jour,
-            heure_debut__lt=self.heure_fin,
-            heure_fin__gt=self.heure_debut
-        ).exclude(module=self.module)
+        # 3️⃣ Empêcher conflits de classe
+        if self.classe_id:
+            conflits_classe = EmploiDuTemps.objects.filter(
+                jour=self.jour,
+                classe=self.classe,
+                heure_debut__lt=self.heure_fin,
+                heure_fin__gt=self.heure_debut
+            ).exclude(module=self.module)
 
-        if self.pk:
-            conflits_horaire = conflits_horaire.exclude(pk=self.pk)
+            if self.pk:
+                conflits_classe = conflits_classe.exclude(pk=self.pk)
 
-        if conflits_horaire.exists():
-            raise ValidationError("⚠️ Conflit détecté : une autre séance est déjà programmée à ce créneau.")
+            if conflits_classe.exists():
+                raise ValidationError("⚠️ Conflit de classe : cette classe a déjà un cours à ce créneau.")
+
+        # 4️⃣ Empêcher conflits de formateur
+        if self.formateur_id:
+            conflits_formateur = EmploiDuTemps.objects.filter(
+                jour=self.jour,
+                formateur=self.formateur,
+                heure_debut__lt=self.heure_fin,
+                heure_fin__gt=self.heure_debut
+            ).exclude(module=self.module)
+
+            if self.pk:
+                conflits_formateur = conflits_formateur.exclude(pk=self.pk)
+
+            if conflits_formateur.exists():
+                raise ValidationError("⚠️ Conflit de formateur : ce formateur a déjà un cours à ce créneau.")
 
     def save(self, *args, **kwargs):
         """Sauvegarde + propagation directe des tronc communs."""

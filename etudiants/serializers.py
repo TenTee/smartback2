@@ -131,5 +131,37 @@ class EtudiantSerializer(serializers.ModelSerializer):
                 )
             except Niveau.DoesNotExist:
                 pass
-        
+
         return etudiant
+
+    def update(self, instance, validated_data):
+        validated_data.pop('cycle_id', None)
+        niveau_id = validated_data.pop('niveau_id', None)
+        classe_id = validated_data.pop('classe_id', None)
+        annee_academique_ref_id = validated_data.pop('annee_academique_ref_id', None)
+
+        instance = super().update(instance, validated_data)
+
+        if classe_id:
+            try:
+                classe = Classe.objects.get(pk=classe_id)
+                annee = classe.annee_academique
+                if annee_academique_ref_id:
+                    annee = AnneeAcademique.objects.get(pk=annee_academique_ref_id)
+                inscription = instance.inscriptions.filter(annee_academique_ref=annee).first()
+                if inscription:
+                    Inscription.objects.filter(pk=inscription.pk).update(
+                        classe=classe, niveau=classe.niveau
+                    )
+                else:
+                    Inscription.objects.create(
+                        etudiant=instance,
+                        classe=classe,
+                        niveau=classe.niveau,
+                        annee_academique=annee.libelle,
+                        annee_academique_ref=annee,
+                    )
+            except (Classe.DoesNotExist, AnneeAcademique.DoesNotExist):
+                pass
+
+        return instance

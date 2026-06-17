@@ -10,7 +10,6 @@ class SalleSerializer(serializers.ModelSerializer):
 
 class EmploiDuTempsSerializer(serializers.ModelSerializer):
     filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
-    formation_nom = serializers.CharField(source="filiere.nom", read_only=True)
     niveau_nom = serializers.CharField(source="niveau.nom", read_only=True)
     classe_nom = serializers.CharField(source="classe.nom", read_only=True)
     module_nom = serializers.CharField(source="module.nom", read_only=True)
@@ -63,19 +62,40 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
                 "non_field_errors": ["⚠️ Conflit de salle : cette salle est déjà occupée à ce créneau."]
             })
 
-        # 3️⃣ Empêcher conflits globaux (hors tronc communs du même module)
-        conflits_horaire = EmploiDuTemps.objects.filter(
-            jour=data["jour"],
-            heure_debut__lt=data["heure_fin"],
-            heure_fin__gt=data["heure_debut"]
-        ).exclude(module=data["module"])  # ✅ ignore duplications du même module
+        # 3️⃣ Empêcher conflits de classe (même classe, même créneau)
+        classe = data.get("classe")
+        if classe:
+            conflits_classe = EmploiDuTemps.objects.filter(
+                jour=data["jour"],
+                classe=classe,
+                heure_debut__lt=data["heure_fin"],
+                heure_fin__gt=data["heure_debut"]
+            ).exclude(module=data["module"])
 
-        if self.instance and self.instance.pk:
-            conflits_horaire = conflits_horaire.exclude(pk=self.instance.pk)
+            if self.instance and self.instance.pk:
+                conflits_classe = conflits_classe.exclude(pk=self.instance.pk)
 
-        if conflits_horaire.exists():
-            raise serializers.ValidationError({
-                "non_field_errors": ["⚠️ Conflit détecté : une autre séance est déjà programmée à ce créneau."]
-            })
+            if conflits_classe.exists():
+                raise serializers.ValidationError({
+                    "non_field_errors": ["⚠️ Conflit de classe : cette classe a déjà un cours à ce créneau."]
+                })
+
+        # 4️⃣ Empêcher conflits de formateur (même formateur, même créneau)
+        formateur = data.get("formateur")
+        if formateur:
+            conflits_formateur = EmploiDuTemps.objects.filter(
+                jour=data["jour"],
+                formateur=formateur,
+                heure_debut__lt=data["heure_fin"],
+                heure_fin__gt=data["heure_debut"]
+            ).exclude(module=data["module"])
+
+            if self.instance and self.instance.pk:
+                conflits_formateur = conflits_formateur.exclude(pk=self.instance.pk)
+
+            if conflits_formateur.exists():
+                raise serializers.ValidationError({
+                    "non_field_errors": ["⚠️ Conflit de formateur : ce formateur a déjà un cours à ce créneau."]
+                })
 
         return data

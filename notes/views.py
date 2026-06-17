@@ -1,11 +1,11 @@
-from django.db.models import Avg
+from django.db.models import Avg, Q
 from rest_framework import viewsets
 from rest_framework.response import Response
 from rest_framework.decorators import action
 
 from .models import Note, Etudiant, Module
 from etudiants.models import Inscription
-from academique.models import Filiere, Niveau, CourseAssignment, Evaluation, Classe
+from academique.models import Filiere, Niveau, CourseAssignment, Evaluation, Classe, AnneeAcademique
 from .serializers import NoteSerializer, NoteSummarySerializer, NoteFiliereSerializer
 from academique.middleware import get_current_academic_year_id
 
@@ -15,16 +15,23 @@ class NoteViewSet(viewsets.ModelViewSet):
     serializer_class = NoteSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
-        
+        queryset = super().get_queryset().select_related(
+            'etudiant', 'etudiant__filiere', 'module', 'classe', 'evaluation'
+        )
+
         # Filtre global par année académique
         year_id = get_current_academic_year_id()
         if year_id:
-            queryset = queryset.filter(classe__annee_academique_id=year_id)
+            annee = AnneeAcademique.objects.filter(pk=year_id).first()
+            if annee:
+                queryset = queryset.filter(
+                    Q(classe__annee_academique_id=year_id) |
+                    Q(classe__isnull=True, annee_academique=annee.libelle)
+                )
 
         classe_id = self.request.query_params.get("classe")
         evaluation_id = self.request.query_params.get("evaluation")
-        
+
         # Filtre automatique si c'est un étudiant qui demande ses propres notes
         if self.request.user.is_authenticated and getattr(self.request.user, 'role', '') == 'etudiant':
             etudiant = getattr(self.request.user, 'etudiant_profile', None)
@@ -101,7 +108,7 @@ class NoteViewSet(viewsets.ModelViewSet):
             for n in notes:
                 etudiant_id = n["etudiant_id"]
                 session = n["session"]
-                moyenne_sur_20 = Note.moyenne_etudiant(etudiant_id, session=session)
+                moyenne_sur_20 = Note.moyenne_etudiant(Etudiant.objects.get(pk=etudiant_id), session=session)
                 if moyenne_sur_20 is None:
                     moyenne_sur_20 = 0
 

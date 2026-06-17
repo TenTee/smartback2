@@ -46,13 +46,12 @@ urlpatterns = [
     path("api/", include("demandes.urls")),
     path('api/conges/', include('conges.urls')),
     path('api/', include('depenses.urls')),
-     path("api/", include("modules.urls")),
-      path("api/", include("emploidutemps.urls")),
+    path("api/", include("modules.urls")),
+    path("api/", include("emploidutemps.urls")),
     path('api/', include('notes.urls')),
     path('api/', include('assiduite.urls')),
     path('api/communication/', include('communication.urls')),
     path("", include("revenus.urls")),
-    path('api/users/', include('users.urls')),
 
     # OpenAPI schema
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

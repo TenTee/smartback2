@@ -9,7 +9,7 @@ class RevenuSerializer(serializers.ModelSerializer):
         fields = "__all__"  # inclut tous les champs du modèle + justificatif_url
 
     def get_justificatif_url(self, obj):
-        request = self.context.get("request")  # ✅ récupère la requête
-        if obj.justificatif and hasattr(obj.justificatif, "url"):
-            return request.build_absolute_uri(obj.justificatif.url)  # ✅ URL absolue
+        request = self.context.get("request")
+        if obj.justificatif and hasattr(obj.justificatif, "url") and request:
+            return request.build_absolute_uri(obj.justificatif.url)
         return None

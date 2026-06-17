@@ -50,8 +50,24 @@ class Note(models.Model):
                 self.annee_academique = self.evaluation.semestre.annee_academique.libelle
             else:
                 self.annee_academique = self.evaluation.classe.annee_academique.libelle
-        elif self.module_id:
-            self.session = self.module.semestre
+        else:
+            if self.module_id and not self.session:
+                self.session = self.module.semestre
+
+            # Auto-assign classe from student's current inscription if not set
+            if not self.classe_id and self.etudiant_id:
+                from etudiants.models import Inscription
+                inscription = Inscription.objects.filter(
+                    etudiant_id=self.etudiant_id,
+                    classe__isnull=False,
+                ).select_related('classe__annee_academique').order_by('-date_inscription').first()
+                if inscription:
+                    self.classe = inscription.classe
+                    self.annee_academique = inscription.classe.annee_academique.libelle
+
+            # Update annee_academique from classe if set
+            if self.classe_id and (not self.annee_academique or self.annee_academique == "2024-2025"):
+                self.annee_academique = self.classe.annee_academique.libelle
 
         m = self.module
         if m and self.note_cc is not None:
@@ -59,11 +75,10 @@ class Note(models.Model):
             params = ParametresGlobaux.get_parametres()
             pc = params.pourcentage_cc
             psn = params.pourcentage_sn
-            
+
             sn_or_r = self.note_rattrapage if self.note_rattrapage is not None else self.note_sn
             total = (float(self.note_cc) * pc) + (float(sn_or_r or 0) * psn)
-            
-            # Conversion sur 20
+
             self.note_finale = round(total / 100.0, 2)
         super().save(*args, **kwargs)
 
