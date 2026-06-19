@@ -31,10 +31,12 @@ class PaiementListCreate(generics.ListCreateAPIView):
 
     def get_queryset(self):
         queryset = Paiement.objects.select_related("etudiant", "filiere", "frais", "frais__classe").all()
-        
+
         year_id = get_current_academic_year_id()
         if year_id:
-            queryset = queryset.filter(frais__classe__annee_academique_id=year_id)
+            queryset = queryset.filter(
+                models.Q(frais__classe__annee_academique_id=year_id) | models.Q(frais__isnull=True)
+            )
 
         etudiant_id = self.request.query_params.get("etudiant")
         frais_id = self.request.query_params.get("frais")
@@ -53,32 +55,39 @@ class PaiementDetail(generics.RetrieveUpdateDestroyAPIView):
 class PaiementAggregated(APIView):
     def get(self, request):
         etudiants = Etudiant.objects.select_related("filiere").prefetch_related("inscriptions", "inscriptions__classe")
-        
+
         year_id = get_current_academic_year_id()
         if year_id:
             etudiants = etudiants.filter(inscriptions__annee_academique_ref_id=year_id).distinct()
 
         results = []
         for etudiant in etudiants:
-            # Récupérer l'inscription active (la plus récente)
-            derniere_inscription = etudiant.inscriptions.order_by("-date_inscription").first()
-            
+            # Récupérer l'inscription de l'année en cours
+            if year_id:
+                derniere_inscription = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
+            else:
+                derniere_inscription = etudiant.inscriptions.order_by("-date_inscription").first()
+
             classe = derniere_inscription.classe if derniere_inscription else None
-            
+
             # Calculer les frais dûs
             montant_du_inscription = Decimal("0")
             montant_du_formation = Decimal("0")
-            
+
             if classe:
                 frais_classe = Frais.objects.filter(classe=classe)
                 frais_inscription = frais_classe.filter(libelle__icontains="inscription")
                 frais_formation = frais_classe.exclude(libelle__icontains="inscription")
-                
+
                 montant_du_inscription = frais_inscription.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
                 montant_du_formation = frais_formation.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
-            
-            # Calculer les paiements effectués
+
+            # Calculer les paiements effectués (inclure ceux avec et sans frais)
             paiements = Paiement.objects.filter(etudiant=etudiant)
+            if year_id:
+                paiements = paiements.filter(
+                    models.Q(frais__classe__annee_academique_id=year_id) | models.Q(frais__isnull=True)
+                )
             paiements_inscription = paiements.filter(paiement_type="INSCRIPTION")
             paiements_formation = paiements.filter(paiement_type="FORMATION")
 
@@ -91,7 +100,7 @@ class PaiementAggregated(APIView):
             montant_paye_formation_total = paiements_formation.aggregate(
                 total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
             )["total"]
-            
+
             derniere_date = paiements.aggregate(last=Max("date_paiement"))["last"]
 
             solde_inscription = float(montant_du_inscription) - float(montant_paye_inscription_total)
@@ -257,7 +266,9 @@ class FinancialDashboardView(APIView):
         # Montants recouvrés
         paiements_qs = Paiement.objects.all()
         if year_id:
-            paiements_qs = paiements_qs.filter(frais__classe__annee_academique_id=year_id)
+            paiements_qs = paiements_qs.filter(
+                models.Q(frais__classe__annee_academique_id=year_id) | models.Q(frais__isnull=True)
+            )
 
         total_recouvre_inscription = paiements_qs.filter(
             paiement_type="INSCRIPTION"

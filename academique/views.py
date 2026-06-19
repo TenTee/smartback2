@@ -478,16 +478,12 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
         preinscription = self.get_object()
         try:
             with transaction.atomic():
-                # Mark as approved
                 preinscription.statut = "APPROUVEE"
                 preinscription.save()
 
-                # Synchroniser: créer ou lier l'Etudiant
-                # Vérifier la filière/niveau fournis
                 if not preinscription.filiere_souhaitee or not preinscription.niveau_souhaite:
                     return Response({"error": "Filière ou niveau manquant sur la pré-inscription."}, status=400)
 
-                # Rechercher un étudiant existant par email
                 etudiant = Etudiant.objects.filter(email=preinscription.email).first()
                 if not etudiant:
                     etudiant = Etudiant.objects.create(
@@ -500,7 +496,6 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                         statut="Inscrit",
                     )
                 else:
-                    # Mettre à jour certaines infos si nécessaire
                     etudiant.filiere = preinscription.filiere_souhaitee
                     etudiant.nom_parent = preinscription.nom_parent or etudiant.nom_parent
                     etudiant.whatsapp_parent = preinscription.whatsapp_parent or etudiant.whatsapp_parent
@@ -508,7 +503,6 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                     etudiant.statut = "Inscrit"
                     etudiant.save()
 
-                # Créer une inscription pour l'année académique courante
                 year = None
                 year_id = get_current_academic_year_id()
                 if year_id:
@@ -521,7 +515,15 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
 
                 annee_libelle = year.libelle if year else "(non défini)"
 
-                # Vérifier si une inscription similaire existe
+                # Trouver la classe correspondant à filière + niveau + année
+                classe = None
+                if year:
+                    classe = Classe.objects.filter(
+                        filiere=preinscription.filiere_souhaitee,
+                        niveau=preinscription.niveau_souhaite,
+                        annee_academique=year,
+                    ).first()
+
                 existing_inscription = Inscription.objects.filter(
                     etudiant=etudiant,
                     niveau=preinscription.niveau_souhaite,
@@ -531,10 +533,46 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                 if not existing_inscription:
                     inscription = Inscription.objects.create(
                         etudiant=etudiant,
+                        classe=classe,
                         niveau=preinscription.niveau_souhaite,
                         annee_academique=annee_libelle,
                         annee_academique_ref=year if year else None,
                     )
+                elif not existing_inscription.classe and classe:
+                    existing_inscription.classe = classe
+                    existing_inscription.save()
+
+                # Enregistrer les paiements initiaux si des montants ont été versés
+                montant_inscription = Decimal(str(request.data.get("montant_inscription_verse", "0") or "0"))
+                montant_formation = Decimal(str(request.data.get("montant_formation_verse", "0") or "0"))
+
+                if classe and (montant_inscription > 0 or montant_formation > 0):
+                    frais_inscription = Frais.objects.filter(
+                        classe=classe, libelle__icontains="inscription"
+                    ).first()
+                    frais_formation = Frais.objects.filter(
+                        classe=classe
+                    ).exclude(libelle__icontains="inscription").first()
+
+                    if montant_inscription > 0:
+                        Paiement.objects.create(
+                            etudiant=etudiant,
+                            filiere=preinscription.filiere_souhaitee,
+                            frais=frais_inscription,
+                            paiement_type="INSCRIPTION",
+                            montant_paye=montant_inscription,
+                            moyen_paiement="cash",
+                        )
+
+                    if montant_formation > 0:
+                        Paiement.objects.create(
+                            etudiant=etudiant,
+                            filiere=preinscription.filiere_souhaitee,
+                            frais=frais_formation,
+                            paiement_type="FORMATION",
+                            montant_paye=montant_formation,
+                            moyen_paiement="cash",
+                        )
 
                 return Response({
                     "message": "Pré-inscription approuvée et synchronisée.",
@@ -544,8 +582,16 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
             traceback.print_exc()
             return Response({"error": "Impossible d'approuver"}, status=500)
 
+    @action(detail=True, methods=["post"], url_path="reject")
+    def reject(self, request, pk=None):
+        preinscription = self.get_object()
+        if preinscription.statut != "EN_ATTENTE":
+            return Response({"error": "Seules les pré-inscriptions en attente peuvent être rejetées."}, status=400)
+        preinscription.statut = "REJETEE"
+        preinscription.save()
+        return Response({"message": "Pré-inscription rejetée."})
+
     def get_permissions(self):
-        # Allow anonymous users to create pré-inscriptions (public form)
         if self.action == "create":
             return [permissions.AllowAny()]
         return [permissions.IsAuthenticated()]

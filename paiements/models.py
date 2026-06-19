@@ -342,18 +342,25 @@ class Paiement(models.Model):
         if self.etudiant and self.etudiant.filiere:
             self.filiere = self.etudiant.filiere
 
-        # Logic for reference amount needs to be adapted or removed if it depended on Formation model specific fields
-        # Assuming Filiere might have similar fields or we use a default
-        # For now, let's keep it simple or use 0 if not sure
         reference_amount = Decimal("0")
         if self.frais_id:
             reference_amount = self.frais.montant
-        
-        # We need a way to get the total amount for the filiere. 
-        # Maybe FilierePaymentPolicy has it or we add it to Filiere.
-        # For now, let's assume we can't easily get it without Formation.
-        # I'll use a placeholder or keep the logic if it's still valid.
-        
+        elif self.etudiant_id:
+            # Calculer le montant de référence via la classe de l'inscription
+            from etudiants.models import Inscription
+            inscription = Inscription.objects.filter(
+                etudiant=self.etudiant
+            ).select_related("classe").order_by("-date_inscription").first()
+            if inscription and inscription.classe:
+                frais_qs = Frais.objects.filter(classe=inscription.classe)
+                if self.paiement_type == "INSCRIPTION":
+                    frais_qs = frais_qs.filter(libelle__icontains="inscription")
+                else:
+                    frais_qs = frais_qs.exclude(libelle__icontains="inscription")
+                reference_amount = frais_qs.aggregate(
+                    total=models.Sum("montant")
+                )["total"] or Decimal("0")
+
         existing_payments = Paiement.objects.filter(etudiant=self.etudiant)
         if self.frais_id:
             existing_payments = existing_payments.filter(frais=self.frais)
@@ -368,12 +375,8 @@ class Paiement(models.Model):
 
         first = existing_payments.exclude(pk=self.pk).order_by("date_paiement").first()
         if first and first.montant_du:
-            # if total_paid > first.montant_du:
-            #     raise ValueError("Le montant payé dépasse le montant dû.")
             self.solde_restant = first.montant_du - total_paid
         else:
-            # if total_paid > reference_amount:
-            #     raise ValueError("Le montant payé dépasse le montant dû.")
             self.solde_restant = reference_amount - total_paid
 
         super().save(*args, **kwargs)
