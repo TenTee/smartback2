@@ -1,5 +1,6 @@
 from decimal import Decimal
-from django.db.models import Max, Sum, Value, DecimalField
+from django.db import models
+from django.db.models import Max, Sum, Value, DecimalField, Count
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import generics
@@ -214,6 +215,170 @@ class PaymentAlertListView(APIView):
 
         serializer = PaymentAlertSerializer(alerts, many=True)
         return Response(serializer.data)
+
+class FinancialDashboardView(APIView):
+    """
+    Dashboard financier global avec toutes les métriques clés.
+    """
+    def get(self, request):
+        year_id = get_current_academic_year_id()
+
+        # Étudiants inscrits cette année
+        etudiants_qs = Etudiant.objects.all()
+        if year_id:
+            etudiants_qs = etudiants_qs.filter(inscriptions__annee_academique_ref_id=year_id).distinct()
+        total_etudiants = etudiants_qs.count()
+
+        # Calcul total des frais attendus
+        from academique.models import Classe
+        classes_qs = Classe.objects.all()
+        if year_id:
+            classes_qs = classes_qs.filter(annee_academique_id=year_id)
+
+        total_attendu_inscription = Decimal("0")
+        total_attendu_formation = Decimal("0")
+        total_recouvre_inscription = Decimal("0")
+        total_recouvre_formation = Decimal("0")
+
+        for etudiant in etudiants_qs:
+            derniere_inscription = etudiant.inscriptions.order_by("-date_inscription").first()
+            if year_id:
+                derniere_inscription = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
+            classe = derniere_inscription.classe if derniere_inscription else None
+            if classe:
+                frais_classe = Frais.objects.filter(classe=classe)
+                total_attendu_inscription += frais_classe.filter(
+                    libelle__icontains="inscription"
+                ).aggregate(t=Sum("montant"))["t"] or Decimal("0")
+                total_attendu_formation += frais_classe.exclude(
+                    libelle__icontains="inscription"
+                ).aggregate(t=Sum("montant"))["t"] or Decimal("0")
+
+        # Montants recouvrés
+        paiements_qs = Paiement.objects.all()
+        if year_id:
+            paiements_qs = paiements_qs.filter(frais__classe__annee_academique_id=year_id)
+
+        total_recouvre_inscription = paiements_qs.filter(
+            paiement_type="INSCRIPTION"
+        ).aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+        total_recouvre_formation = paiements_qs.filter(
+            paiement_type="FORMATION"
+        ).aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+
+        total_attendu = total_attendu_inscription + total_attendu_formation
+        total_recouvre = total_recouvre_inscription + total_recouvre_formation
+        taux_recouvrement = (float(total_recouvre) / float(total_attendu) * 100) if total_attendu > 0 else 0
+
+        # Étudiants par statut de paiement
+        etudiants_soldes = 0
+        etudiants_partiels = 0
+        etudiants_non_payes = 0
+        for etudiant in etudiants_qs:
+            total_du = Decimal("0")
+            derniere_inscription = etudiant.inscriptions.order_by("-date_inscription").first()
+            if year_id:
+                derniere_inscription = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
+            classe = derniere_inscription.classe if derniere_inscription else None
+            if classe:
+                total_du = Frais.objects.filter(classe=classe).aggregate(t=Sum("montant"))["t"] or Decimal("0")
+
+            total_paye = Paiement.objects.filter(etudiant=etudiant).aggregate(
+                t=Sum("montant_paye"))["t"] or Decimal("0")
+
+            if total_du > 0:
+                if total_paye >= total_du:
+                    etudiants_soldes += 1
+                elif total_paye > 0:
+                    etudiants_partiels += 1
+                else:
+                    etudiants_non_payes += 1
+            else:
+                etudiants_non_payes += 1
+
+        # Paiements récents (7 derniers jours)
+        from datetime import timedelta
+        seven_days_ago = timezone.now() - timedelta(days=7)
+        paiements_recents = paiements_qs.filter(date_paiement__gte=seven_days_ago).count()
+        montant_recents = paiements_qs.filter(
+            date_paiement__gte=seven_days_ago
+        ).aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+
+        # Répartition par moyen de paiement
+        repartition_moyens = []
+        for moyen_code, moyen_label in Paiement.MOYENS:
+            total = paiements_qs.filter(moyen_paiement=moyen_code).aggregate(t=Sum("montant_paye"))["t"] or 0
+            count = paiements_qs.filter(moyen_paiement=moyen_code).count()
+            if count > 0:
+                repartition_moyens.append({
+                    "moyen": moyen_label,
+                    "code": moyen_code,
+                    "montant": float(total),
+                    "nombre": count,
+                })
+
+        # Paiements par mois (historique)
+        from django.db.models.functions import TruncMonth, ExtractMonth, ExtractYear
+        paiements_par_mois = (
+            paiements_qs
+            .annotate(mois=ExtractMonth('date_paiement'), annee=ExtractYear('date_paiement'))
+            .values('mois', 'annee')
+            .annotate(total=Sum('montant_paye'), nombre=models.Count('id'))
+            .order_by('annee', 'mois')
+        )
+
+        # Alertes
+        today = timezone.localdate()
+        installments_overdue = StudentPaymentInstallment.objects.filter(
+            status=StudentPaymentInstallment.STATUS_OVERDUE
+        )
+        if year_id:
+            installments_overdue = installments_overdue.filter(
+                plan__etudiant__inscriptions__annee_academique_ref_id=year_id
+            ).distinct()
+        nb_echeances_retard = installments_overdue.count()
+        montant_echeances_retard = sum(i.balance_due for i in installments_overdue)
+
+        # Répartition par filière
+        from academique.models import Filiere as FiliereModel
+        repartition_filieres = []
+        filieres = FiliereModel.objects.all()
+        for filiere in filieres:
+            etudiants_filiere = etudiants_qs.filter(filiere=filiere)
+            nb_etudiants = etudiants_filiere.count()
+            if nb_etudiants == 0:
+                continue
+            total_paye_filiere = Paiement.objects.filter(
+                etudiant__in=etudiants_filiere
+            ).aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+            repartition_filieres.append({
+                "filiere": filiere.nom,
+                "nb_etudiants": nb_etudiants,
+                "total_recouvre": float(total_paye_filiere),
+            })
+
+        return Response({
+            "total_etudiants": total_etudiants,
+            "total_attendu": float(total_attendu),
+            "total_attendu_inscription": float(total_attendu_inscription),
+            "total_attendu_formation": float(total_attendu_formation),
+            "total_recouvre": float(total_recouvre),
+            "total_recouvre_inscription": float(total_recouvre_inscription),
+            "total_recouvre_formation": float(total_recouvre_formation),
+            "solde_global": float(total_attendu - total_recouvre),
+            "taux_recouvrement": round(taux_recouvrement, 1),
+            "etudiants_soldes": etudiants_soldes,
+            "etudiants_partiels": etudiants_partiels,
+            "etudiants_non_payes": etudiants_non_payes,
+            "paiements_7j": paiements_recents,
+            "montant_7j": float(montant_recents),
+            "repartition_moyens": repartition_moyens,
+            "paiements_par_mois": list(paiements_par_mois),
+            "nb_echeances_retard": nb_echeances_retard,
+            "montant_echeances_retard": float(montant_echeances_retard),
+            "repartition_filieres": repartition_filieres,
+        })
+
 
 from rest_framework.permissions import AllowAny
 from rest_framework import status
