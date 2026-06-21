@@ -12,7 +12,9 @@ class FormateurSerializer(serializers.ModelSerializer):
             'nom',
             'email',
             'contact',
-            'salaire',            # ✅ ajout du champ salaire
+            'type_formateur',
+            'salaire',
+            'taux_horaire',
             'specialites',
             'specialites_nom'
         ]

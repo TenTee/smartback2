@@ -8,6 +8,7 @@ SEMESTRE_CHOICES = [
 
 class Module(models.Model):
     nom = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default="")
     duree = models.PositiveIntegerField(default=0, help_text="Durée en heures")
     coefficient = models.PositiveIntegerField(default=1, help_text="Coefficient du module")
     semestre = models.CharField(

@@ -19,6 +19,7 @@ from .serializers import (
 )
 from personnels.models import Personnel
 from formateurs.models import Formateur
+from emploidutemps.models import EmploiDuTemps
 
 
 class PaieViewSet(viewsets.ModelViewSet):
@@ -140,7 +141,26 @@ class GenererCampagneView(APIView):
         today = date.today()
 
         for ct, beneficiaire in all_beneficiaires:
-            salaire_base = Decimal(str(beneficiaire.salaire or 0))
+            # Calcul du salaire de base selon le type de formateur
+            if ct == formateur_ct and beneficiaire.type_formateur == 'vacataire':
+                taux = Decimal(str(beneficiaire.taux_horaire or 0))
+                if taux <= 0:
+                    continue
+                # Calculer les heures hebdomadaires depuis l'emploi du temps
+                creneaux = EmploiDuTemps.objects.filter(formateur=beneficiaire)
+                heures_semaine = Decimal('0')
+                for c in creneaux:
+                    delta = (
+                        c.heure_fin.hour * 60 + c.heure_fin.minute
+                        - c.heure_debut.hour * 60 - c.heure_debut.minute
+                    )
+                    heures_semaine += Decimal(str(delta)) / Decimal('60')
+                # ~4.33 semaines par mois
+                heures_mois = heures_semaine * Decimal('4.33')
+                salaire_base = (taux * heures_mois).quantize(Decimal('0.01'))
+            else:
+                salaire_base = Decimal(str(beneficiaire.salaire or 0))
+
             if salaire_base <= 0:
                 continue
 
@@ -297,8 +317,24 @@ class PaieForecastView(APIView):
         year = today.year
 
         total_personnel = Personnel.objects.aggregate(total=Sum('salaire'))['total'] or 0
-        total_formateurs = Formateur.objects.aggregate(total=Sum('salaire'))['total'] or 0
-        total_previsionnel = total_personnel + total_formateurs
+        # Permanents : salaire fixe
+        total_formateurs_permanents = Formateur.objects.filter(
+            type_formateur='permanent'
+        ).aggregate(total=Sum('salaire'))['total'] or 0
+        # Vacataires : estimation basée sur taux_horaire * heures emploi du temps
+        total_formateurs_vacataires = Decimal('0')
+        for f in Formateur.objects.filter(type_formateur='vacataire', taux_horaire__gt=0):
+            creneaux = EmploiDuTemps.objects.filter(formateur=f)
+            heures_semaine = Decimal('0')
+            for c in creneaux:
+                delta = (
+                    c.heure_fin.hour * 60 + c.heure_fin.minute
+                    - c.heure_debut.hour * 60 - c.heure_debut.minute
+                )
+                heures_semaine += Decimal(str(delta)) / Decimal('60')
+            total_formateurs_vacataires += f.taux_horaire * heures_semaine * Decimal('4.33')
+        total_formateurs = Decimal(str(total_formateurs_permanents)) + total_formateurs_vacataires
+        total_previsionnel = Decimal(str(total_personnel)) + total_formateurs
 
         total_paye = Paie.objects.filter(
             date__month=month, date__year=year, statut="Payé"

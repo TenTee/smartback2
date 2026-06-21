@@ -9,7 +9,7 @@ class ModuleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Module
         fields = [
-            'id', 'nom', 'duree', 'coefficient',
+            'id', 'nom', 'description', 'duree', 'coefficient',
             'semestre',
             'formateurs', 'attributions'
         ]
