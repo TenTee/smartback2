@@ -2,6 +2,14 @@ from rest_framework import serializers
 from .models import Note
 
 
+def validate_note_max_20(value):
+    if value is not None and value > 20:
+        raise serializers.ValidationError("La note ne peut pas dépasser 20.")
+    if value is not None and value < 0:
+        raise serializers.ValidationError("La note ne peut pas être négative.")
+    return value
+
+
 # Serializer détaillé (notes par module)
 class NoteSerializer(serializers.ModelSerializer):
     etudiant_nom = serializers.CharField(source="etudiant.nom", read_only=True)
@@ -33,9 +41,18 @@ class NoteSerializer(serializers.ModelSerializer):
             "note_sn",
             "note_rattrapage",
             "note_finale",
-            "note_sur_20",   # ✅ ajouté
+            "note_sur_20",
             "besoin_rattrapage",
         ]
+
+    def validate_note_cc(self, value):
+        return validate_note_max_20(value)
+
+    def validate_note_sn(self, value):
+        return validate_note_max_20(value)
+
+    def validate_note_rattrapage(self, value):
+        return validate_note_max_20(value)
 
     def get_note_sur_20(self, obj):
         return float(obj.note_finale) if obj.note_finale is not None else None

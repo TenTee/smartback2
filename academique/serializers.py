@@ -539,6 +539,22 @@ class AcademicNoteSerializer(serializers.ModelSerializer):
         aff = Affectation.objects.filter(module_id=obj.module_id, classe_id=obj.classe_id).first()
         return aff.enseignant.nom if aff and aff.enseignant else "Non assigné"
 
+    def _validate_note(self, value):
+        if value is not None and value > 20:
+            raise serializers.ValidationError("La note ne peut pas dépasser 20.")
+        if value is not None and value < 0:
+            raise serializers.ValidationError("La note ne peut pas être négative.")
+        return value
+
+    def validate_note_cc(self, value):
+        return self._validate_note(value)
+
+    def validate_note_sn(self, value):
+        return self._validate_note(value)
+
+    def validate_note_rattrapage(self, value):
+        return self._validate_note(value)
+
     class Meta:
         model = Note
         fields = "__all__"

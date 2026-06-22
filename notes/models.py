@@ -1,5 +1,6 @@
 # notes/models.py
 from django.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
 from etudiants.models import Etudiant
 from modules.models import Module
 
@@ -29,9 +30,9 @@ class Note(models.Model):
     annee_academique = models.CharField(max_length=9, default="2024-2025")
 
     # ✅ Notes
-    note_cc = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note CC sur 20")
-    note_sn = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note SN sur 20")
-    note_rattrapage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note Rattrapage sur 20 (facultatif)")
+    note_cc = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note CC sur 20", validators=[MinValueValidator(0), MaxValueValidator(20)])
+    note_sn = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note SN sur 20", validators=[MinValueValidator(0), MaxValueValidator(20)])
+    note_rattrapage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note Rattrapage sur 20 (facultatif)", validators=[MinValueValidator(0), MaxValueValidator(20)])
 
     # ✅ Calcul automatique
     note_finale = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note finale sur 20")
