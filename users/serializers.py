@@ -64,14 +64,13 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'can_manage_etudiants': role_obj.can_manage_etudiants,
             }
         except Role.DoesNotExist:
-            # If user is superuser, give all permissions
             if user.is_superuser:
                 token['permissions'] = {
-                    'can_manage_rh': True,
-                    'can_manage_pedagogie': True,
-                    'can_manage_logistique': True,
-                    'can_manage_finance': True,
-                    'can_manage_etudiants': True,
+                    'can_manage_rh': 'ecriture',
+                    'can_manage_pedagogie': 'ecriture',
+                    'can_manage_logistique': 'ecriture',
+                    'can_manage_finance': 'ecriture',
+                    'can_manage_etudiants': 'ecriture',
                 }
             else:
                 token['permissions'] = {}

@@ -7,17 +7,22 @@ import string
 class Role(models.Model):
     """
     Rôle fonctionnel avec un code (utilisé par les utilisateurs)
-    et quelques permissions simples (à étendre selon les besoins).
+    et permissions à 3 niveaux : aucun / lecture / écriture.
     """
+    ACCESS_CHOICES = [
+        ('none', 'Aucun'),
+        ('lecture', 'Lecture'),
+        ('ecriture', 'Écriture'),
+    ]
+
     code = models.CharField(max_length=50, unique=True)
     libelle = models.CharField(max_length=150)
 
-    # Permissions principales (à adapter si besoin)
-    can_manage_rh = models.BooleanField(default=False)
-    can_manage_pedagogie = models.BooleanField(default=False)
-    can_manage_logistique = models.BooleanField(default=False)
-    can_manage_finance = models.BooleanField(default=False)
-    can_manage_etudiants = models.BooleanField(default=False)
+    can_manage_rh = models.CharField(max_length=10, choices=ACCESS_CHOICES, default='none')
+    can_manage_pedagogie = models.CharField(max_length=10, choices=ACCESS_CHOICES, default='none')
+    can_manage_logistique = models.CharField(max_length=10, choices=ACCESS_CHOICES, default='none')
+    can_manage_finance = models.CharField(max_length=10, choices=ACCESS_CHOICES, default='none')
+    can_manage_etudiants = models.CharField(max_length=10, choices=ACCESS_CHOICES, default='none')
 
     def __str__(self):
         return self.libelle
