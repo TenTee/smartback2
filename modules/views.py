@@ -12,12 +12,14 @@ class ModuleListCreateView(generics.ListCreateAPIView):
     def perform_create(self, serializer):
         module = serializer.save()
         classe_id = self.request.data.get('classe')
+        if isinstance(classe_id, list):
+            classe_id = classe_id[0] if classe_id else None
         if classe_id:
             from academique.models import Classe
             try:
                 classe = Classe.objects.get(id=classe_id)
                 classe.modules.add(module)
-            except (Classe.DoesNotExist, ValueError):
+            except (Classe.DoesNotExist, ValueError, TypeError):
                 pass
 
 class ModuleRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
@@ -27,12 +29,14 @@ class ModuleRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
     def perform_update(self, serializer):
         module = serializer.save()
         classe_id = self.request.data.get('classe')
+        if isinstance(classe_id, list):
+            classe_id = classe_id[0] if classe_id else None
         if classe_id:
             from academique.models import Classe
             try:
                 classe = Classe.objects.get(id=classe_id)
                 classe.modules.add(module)
-            except (Classe.DoesNotExist, ValueError):
+            except (Classe.DoesNotExist, ValueError, TypeError):
                 pass
 
     def perform_destroy(self, instance):
