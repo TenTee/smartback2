@@ -28,13 +28,17 @@ class ModuleRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
     def perform_update(self, serializer):
         module = serializer.save()
-        classe_id = self.request.data.get('classe')
-        if isinstance(classe_id, list):
-            classe_id = classe_id[0] if classe_id else None
-        if classe_id:
-            from academique.models import Classe
+        from academique.models import Classe
+
+        for old_classe in Classe.objects.filter(modules=module):
+            old_classe.modules.remove(module)
+
+        classe_ids = self.request.data.get('classe')
+        if not isinstance(classe_ids, list):
+            classe_ids = [classe_ids] if classe_ids else []
+        for cid in classe_ids:
             try:
-                classe = Classe.objects.get(id=classe_id)
+                classe = Classe.objects.get(id=cid)
                 classe.modules.add(module)
             except (Classe.DoesNotExist, ValueError, TypeError):
                 pass
