@@ -126,22 +126,36 @@ class FormateurPortalViewSet(viewsets.ViewSet):
         serializer = FormateurPortalSerializer(formateur, context={'request': request})
         return Response(serializer.data)
 
+    def _get_classe_module_pairs(self, formateur):
+        from academique.models import Affectation
+        from emploidutemps.models import EmploiDuTemps
+
+        pairs = set()
+
+        for aff in Affectation.objects.filter(enseignant=formateur).select_related('classe', 'module'):
+            pairs.add((aff.classe, aff.module))
+
+        for edt in EmploiDuTemps.objects.filter(formateur=formateur).select_related('classe', 'module'):
+            if edt.classe and edt.module:
+                pairs.add((edt.classe, edt.module))
+
+        return list(pairs)
+
     @action(detail=False, methods=['get'], url_path='mes-classes')
     def mes_classes(self, request):
         formateur = self._get_formateur(request)
         if not formateur:
             return Response({"detail": "Profil formateur introuvable."}, status=404)
 
-        from academique.models import Affectation
         from etudiants.models import Inscription
         from academique.middleware import get_current_academic_year_id
 
         annee_id = get_current_academic_year_id()
-        affectations = Affectation.objects.filter(enseignant=formateur).select_related('classe', 'module')
+        pairs = self._get_classe_module_pairs(formateur)
 
         result = []
-        for aff in affectations:
-            inscriptions = Inscription.objects.filter(classe=aff.classe)
+        for classe, module in pairs:
+            inscriptions = Inscription.objects.filter(classe=classe)
             if annee_id:
                 inscriptions = inscriptions.filter(annee_academique_id=annee_id)
 
@@ -152,15 +166,14 @@ class FormateurPortalViewSet(viewsets.ViewSet):
                     'id': et.id,
                     'matricule': et.matricule,
                     'nom': et.nom,
-                    'prenom': et.prenom,
                     'email': getattr(et, 'email', ''),
                 })
 
             result.append({
-                'classe_id': aff.classe.id,
-                'classe_nom': str(aff.classe),
-                'module_id': aff.module.id,
-                'module_nom': aff.module.nom,
+                'classe_id': classe.id,
+                'classe_nom': str(classe),
+                'module_id': module.id,
+                'module_nom': module.nom,
                 'effectif': len(etudiants),
                 'etudiants': etudiants,
             })
@@ -187,20 +200,18 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             return Response({"detail": "Profil formateur introuvable."}, status=404)
 
         from notes.models import Note
-        from academique.models import Affectation
-        from academique.middleware import get_current_academic_year_id
 
         module_id = request.query_params.get('module_id')
         classe_id = request.query_params.get('classe_id')
 
-        affectations = Affectation.objects.filter(enseignant=formateur)
-        if module_id:
-            affectations = affectations.filter(module_id=module_id)
-        if classe_id:
-            affectations = affectations.filter(classe_id=classe_id)
+        pairs = self._get_classe_module_pairs(formateur)
+        module_ids = set(m.id for _, m in pairs)
+        classe_ids = set(c.id for c, _ in pairs)
 
-        module_ids = affectations.values_list('module_id', flat=True)
-        classe_ids = affectations.values_list('classe_id', flat=True)
+        if module_id:
+            module_ids = {int(module_id)} & module_ids
+        if classe_id:
+            classe_ids = {int(classe_id)} & classe_ids
 
         notes = Note.objects.filter(
             module_id__in=module_ids,
@@ -212,7 +223,7 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             data.append({
                 'id': note.id,
                 'etudiant_id': note.etudiant.id,
-                'etudiant_nom': f"{note.etudiant.nom} {note.etudiant.prenom}",
+                'etudiant_nom': note.etudiant.nom,
                 'etudiant_matricule': note.etudiant.matricule,
                 'module_id': note.module.id,
                 'module_nom': note.module.nom,
@@ -234,15 +245,13 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             return Response({"detail": "Profil formateur introuvable."}, status=404)
 
         from notes.models import Note
-        from academique.models import Affectation
 
         notes_data = request.data.get('notes', [])
         if not notes_data:
             return Response({"detail": "Aucune note fournie."}, status=400)
 
-        affectation_modules = set(
-            Affectation.objects.filter(enseignant=formateur).values_list('module_id', flat=True)
-        )
+        pairs = self._get_classe_module_pairs(formateur)
+        allowed_module_ids = set(m.id for _, m in pairs)
 
         created_count = 0
         updated_count = 0
@@ -250,8 +259,8 @@ class FormateurPortalViewSet(viewsets.ViewSet):
 
         for item in notes_data:
             module_id = item.get('module_id')
-            if module_id and int(module_id) not in affectation_modules:
-                errors.append(f"Module {module_id} non autorisé pour ce formateur.")
+            if module_id and int(module_id) not in allowed_module_ids:
+                errors.append(f"Module {module_id} non autorise pour ce formateur.")
                 continue
 
             try:
@@ -286,16 +295,14 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             return Response({"detail": "Profil formateur introuvable."}, status=404)
 
         from emploidutemps.models import EmploiDuTemps
-        from academique.models import Affectation
         from notes.models import Note
-        from assiduite.models import AssiduiteRecord
 
         total_cours = EmploiDuTemps.objects.filter(formateur=formateur).count()
-        affectations = Affectation.objects.filter(enseignant=formateur)
-        total_classes = affectations.count()
+        pairs = self._get_classe_module_pairs(formateur)
 
-        module_ids = affectations.values_list('module_id', flat=True)
-        classe_ids = affectations.values_list('classe_id', flat=True)
+        module_ids = set(m.id for _, m in pairs)
+        classe_ids = set(c.id for c, _ in pairs)
+
         total_notes_saisies = Note.objects.filter(
             module_id__in=module_ids,
             classe_id__in=classe_ids,
@@ -303,8 +310,8 @@ class FormateurPortalViewSet(viewsets.ViewSet):
 
         return Response({
             'total_seances_semaine': total_cours,
-            'total_classes': total_classes,
-            'total_modules': affectations.values('module_id').distinct().count(),
+            'total_classes': len(pairs),
+            'total_modules': len(module_ids),
             'total_notes_saisies': total_notes_saisies,
         })
 
@@ -348,12 +355,36 @@ class FormateurPortalViewSet(viewsets.ViewSet):
         if not fichier:
             return Response({"detail": "Le fichier sujet est obligatoire."}, status=400)
 
+        module_id = request.data.get('module_id')
+        if not module_id:
+            return Response({"detail": "Le module est obligatoire."}, status=400)
+
+        filiere_id = request.data.get('filiere_id')
+        niveau_id = request.data.get('niveau_id')
+        annee_academique_id = request.data.get('annee_academique_id')
+
+        if not filiere_id or not niveau_id or not annee_academique_id:
+            pairs = self._get_classe_module_pairs(formateur)
+            for classe, module in pairs:
+                if module.id == int(module_id):
+                    if not filiere_id:
+                        filiere_id = classe.filiere_id
+                    if not niveau_id:
+                        niveau_id = classe.niveau_id
+                    if not annee_academique_id:
+                        annee_academique_id = classe.annee_academique_id
+                    break
+
+        if not filiere_id or not niveau_id or not annee_academique_id:
+            return Response({"detail": "Impossible de determiner filiere/niveau/annee."}, status=400)
+
         epreuve = Epreuve.objects.create(
             nom=request.data.get('nom', ''),
-            module_id=request.data.get('module_id'),
-            filiere_id=request.data.get('filiere_id'),
-            niveau_id=request.data.get('niveau_id'),
-            semestre_id=request.data.get('semestre_id'),
+            module_id=module_id,
+            filiere_id=filiere_id,
+            niveau_id=niveau_id,
+            annee_academique_id=annee_academique_id,
+            semestre_id=request.data.get('semestre_id') or None,
             type_epreuve=request.data.get('type_epreuve', 'EXAMEN'),
             auteur=formateur.nom,
             est_partage=request.data.get('est_partage', 'false').lower() == 'true',

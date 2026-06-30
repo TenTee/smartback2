@@ -55,16 +55,35 @@ class FormateurPortalSerializer(serializers.ModelSerializer):
 
     def get_classes(self, obj):
         from academique.models import Affectation
-        affectations = Affectation.objects.filter(enseignant=obj).select_related('classe', 'module')
-        return [
-            {
-                'id': a.classe.id,
-                'nom': str(a.classe),
-                'module_id': a.module.id,
-                'module_nom': a.module.nom,
-            }
-            for a in affectations
-        ]
+        from emploidutemps.models import EmploiDuTemps
+
+        seen = set()
+        result = []
+
+        for a in Affectation.objects.filter(enseignant=obj).select_related('classe', 'module'):
+            key = (a.classe.id, a.module.id)
+            if key not in seen:
+                seen.add(key)
+                result.append({
+                    'id': a.classe.id,
+                    'nom': str(a.classe),
+                    'module_id': a.module.id,
+                    'module_nom': a.module.nom,
+                })
+
+        for edt in EmploiDuTemps.objects.filter(formateur=obj).select_related('classe', 'module'):
+            if edt.classe and edt.module:
+                key = (edt.classe.id, edt.module.id)
+                if key not in seen:
+                    seen.add(key)
+                    result.append({
+                        'id': edt.classe.id,
+                        'nom': str(edt.classe),
+                        'module_id': edt.module.id,
+                        'module_nom': edt.module.nom,
+                    })
+
+        return result
 
 
 class CoursDocumentSerializer(serializers.ModelSerializer):
