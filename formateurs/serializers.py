@@ -1,9 +1,11 @@
 # formateurs/serializers.py
 from rest_framework import serializers
-from .models import Formateur
+from .models import Formateur, CoursDocument
+
 
 class FormateurSerializer(serializers.ModelSerializer):
     specialites_nom = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
 
     class Meta:
         model = Formateur
@@ -16,8 +18,77 @@ class FormateurSerializer(serializers.ModelSerializer):
             'salaire',
             'taux_horaire',
             'specialites',
-            'specialites_nom'
+            'specialites_nom',
+            'user',
+            'username',
         ]
 
     def get_specialites_nom(self, obj):
         return [m.nom for m in obj.specialites.all()]
+
+    def get_username(self, obj):
+        if obj.user:
+            return obj.user.username
+        return None
+
+
+class FormateurPortalSerializer(serializers.ModelSerializer):
+    specialites_nom = serializers.SerializerMethodField()
+    username = serializers.CharField(source='user.username', read_only=True)
+    classes = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Formateur
+        fields = [
+            'id',
+            'nom',
+            'email',
+            'contact',
+            'type_formateur',
+            'specialites_nom',
+            'username',
+            'classes',
+        ]
+
+    def get_specialites_nom(self, obj):
+        return [m.nom for m in obj.specialites.all()]
+
+    def get_classes(self, obj):
+        from academique.models import Affectation
+        affectations = Affectation.objects.filter(enseignant=obj).select_related('classe', 'module')
+        return [
+            {
+                'id': a.classe.id,
+                'nom': str(a.classe),
+                'module_id': a.module.id,
+                'module_nom': a.module.nom,
+            }
+            for a in affectations
+        ]
+
+
+class CoursDocumentSerializer(serializers.ModelSerializer):
+    module_nom = serializers.CharField(source='module.nom', read_only=True)
+    fichier_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CoursDocument
+        fields = [
+            'id',
+            'formateur',
+            'module',
+            'module_nom',
+            'titre',
+            'description',
+            'fichier',
+            'fichier_url',
+            'est_visible_etudiants',
+            'date_upload',
+        ]
+        read_only_fields = ['formateur', 'date_upload']
+
+    def get_fichier_url(self, obj):
+        request = self.context.get('request')
+        if obj.fichier and request:
+            return request.build_absolute_uri(obj.fichier.url)
+        return None

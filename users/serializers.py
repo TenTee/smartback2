@@ -48,12 +48,11 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
 
-        # Add custom claims
         token['username'] = user.username
         token['role'] = user.role
         token['is_superuser'] = user.is_superuser
-        
-        # Add permissions if role exists
+        token['is_formateur'] = hasattr(user, 'formateur_profile') and user.formateur_profile is not None
+
         try:
             role_obj = Role.objects.get(code=user.role)
             token['permissions'] = {
@@ -80,4 +79,5 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
         data['user'] = UserSerializer(self.user).data
+        data['user']['is_formateur'] = hasattr(self.user, 'formateur_profile') and self.user.formateur_profile is not None
         return data
