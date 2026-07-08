@@ -22,12 +22,11 @@ class NoteViewSet(viewsets.ModelViewSet):
         # Filtre global par année académique
         year_id = get_current_academic_year_id()
         if year_id:
-            annee = AnneeAcademique.objects.filter(pk=year_id).first()
-            if annee:
-                queryset = queryset.filter(
-                    Q(classe__annee_academique_id=year_id) |
-                    Q(classe__isnull=True, annee_academique=annee.libelle)
-                )
+            queryset = queryset.filter(
+                Q(annee_academique_ref_id=year_id) |
+                Q(annee_academique_ref__isnull=True, classe__annee_academique_id=year_id) |
+                Q(annee_academique_ref__isnull=True, classe__isnull=True, annee_academique=AnneeAcademique.objects.filter(pk=year_id).values_list('libelle', flat=True)[:1])
+            )
 
         classe_id = self.request.query_params.get("classe")
         evaluation_id = self.request.query_params.get("evaluation")

@@ -248,6 +248,8 @@ class AnneeAcademique(NamedDescriptionModel):
     def save(self, *args, **kwargs):
         self.libelle = self.libelle.strip()
         self.full_clean()
+        if self.est_active:
+            AnneeAcademique.objects.filter(est_active=True).exclude(pk=self.pk).update(est_active=False)
         super().save(*args, **kwargs)
 
 
@@ -383,6 +385,9 @@ class PreInscription(NamedDescriptionModel):
     )
     niveau_souhaite = models.ForeignKey(
         Niveau, on_delete=models.SET_NULL, null=True, blank=True, related_name="pre_inscriptions"
+    )
+    annee_academique = models.ForeignKey(
+        "AnneeAcademique", on_delete=models.SET_NULL, null=True, blank=True, related_name="pre_inscriptions"
     )
     statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default="EN_ATTENTE")
     bulletin = models.FileField(upload_to="pre_inscriptions/bulletins/", null=True, blank=True)

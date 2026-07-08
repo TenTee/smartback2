@@ -28,6 +28,13 @@ class Note(models.Model):
     )
     session = models.CharField(max_length=20, choices=SESSION_CHOICES)
     annee_academique = models.CharField(max_length=9, default="2024-2025")
+    annee_academique_ref = models.ForeignKey(
+        "academique.AnneeAcademique",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notes",
+    )
 
     # ✅ Notes
     note_cc = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text="Note CC sur 20", validators=[MinValueValidator(0), MaxValueValidator(20)])
@@ -49,8 +56,10 @@ class Note(models.Model):
             if self.evaluation.semestre_id:
                 self.session = self.evaluation.semestre.nom
                 self.annee_academique = self.evaluation.semestre.annee_academique.libelle
+                self.annee_academique_ref = self.evaluation.semestre.annee_academique
             else:
                 self.annee_academique = self.evaluation.classe.annee_academique.libelle
+                self.annee_academique_ref = self.evaluation.classe.annee_academique
         else:
             if self.module_id and not self.session:
                 self.session = self.module.semestre
@@ -65,10 +74,14 @@ class Note(models.Model):
                 if inscription:
                     self.classe = inscription.classe
                     self.annee_academique = inscription.classe.annee_academique.libelle
+                    self.annee_academique_ref = inscription.classe.annee_academique
 
             # Update annee_academique from classe if set
             if self.classe_id and (not self.annee_academique or self.annee_academique == "2024-2025"):
                 self.annee_academique = self.classe.annee_academique.libelle
+
+        if not self.annee_academique_ref_id and self.classe_id and self.classe and self.classe.annee_academique_id:
+            self.annee_academique_ref = self.classe.annee_academique
 
         m = self.module
         if m and self.note_cc is not None:

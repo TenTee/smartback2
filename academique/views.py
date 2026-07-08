@@ -461,14 +461,13 @@ class AcademicEmploiDuTempsViewSet(OptimizedModelViewSet):
 
 
 class PreInscriptionViewSet(OptimizedModelViewSet):
-    queryset = PreInscription.objects.select_related("filiere_souhaitee", "cycle_souhaite", "niveau_souhaite").all()
+    queryset = PreInscription.objects.select_related("filiere_souhaitee", "cycle_souhaite", "niveau_souhaite", "annee_academique").all()
     serializer_class = PreInscriptionSerializer
     filterset_fields = ("statut", "filiere_souhaitee", "cycle_souhaite", "niveau_souhaite")
-    
-    def get_queryset(self):
-        # Pour les pré-inscriptions, on filtre par année académique si souhaité
-        # (Elles n'ont pas de lien direct dans le modèle actuel, on pourrait en ajouter un plus tard)
-        return super().get_queryset()
+
+    def perform_create(self, serializer):
+        annee = AnneeAcademique.objects.filter(est_active=True).first()
+        serializer.save(annee_academique=annee)
 
     search_fields = ("nom_candidat", "prenom_candidat", "email", "telephone")
     ordering = ("-created_at",)
