@@ -629,6 +629,32 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "niveau_souhaite_nom",
         ]
 
+    def validate_email(self, value):
+        if not self.instance:
+            existing = PreInscription.objects.filter(
+                email__iexact=value,
+                statut__in=["EN_ATTENTE", "APPROUVEE"],
+            ).exists()
+            if existing:
+                raise serializers.ValidationError(
+                    "Une pré-inscription avec cet email existe déjà. "
+                    "Veuillez patienter pendant le traitement de votre dossier."
+                )
+        return value
+
+    def validate_telephone(self, value):
+        if not self.instance:
+            existing = PreInscription.objects.filter(
+                telephone=value,
+                statut__in=["EN_ATTENTE", "APPROUVEE"],
+            ).exists()
+            if existing:
+                raise serializers.ValidationError(
+                    "Une pré-inscription avec ce numéro de téléphone existe déjà. "
+                    "Veuillez patienter pendant le traitement de votre dossier."
+                )
+        return value
+
 
 class EpreuveSerializer(serializers.ModelSerializer):
     filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
