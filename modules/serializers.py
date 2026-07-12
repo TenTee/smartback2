@@ -31,19 +31,24 @@ class ModuleSerializer(serializers.ModelSerializer):
         res = [
             {
                 "id": ass.id,
+                "filiere_id": ass.filiere_id,
                 "filiere_nom": ass.filiere.nom,
+                "cycle_id": ass.cycle_id,
                 "cycle_nom": ass.cycle.nom,
+                "niveau_id": ass.niveau_id,
                 "niveau_nom": ass.niveau.nom,
             }
             for ass in assignments
         ]
         # 2. Liaisons directes avec les classes
-        for cls in obj.classes_academique.all():
+        for cls in obj.classes_academique.select_related('filiere', 'niveau'):
             res.append({
                 "id": f"cls-{cls.id}",
                 "classe_id": cls.id,
                 "classe_nom": cls.nom,
+                "filiere_id": cls.filiere_id,
                 "filiere_nom": cls.filiere.nom if cls.filiere else "",
+                "niveau_id": cls.niveau_id,
                 "niveau_nom": cls.niveau.nom if cls.niveau else "",
             })
         return res

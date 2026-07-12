@@ -1,13 +1,32 @@
+from decimal import Decimal, InvalidOperation
+
+from django.db import transaction
 from django.db.models import Avg, Q
-from rest_framework import viewsets
+from rest_framework import viewsets, status as http_status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 
 from .models import Note, Etudiant, Module
 from etudiants.models import Inscription
-from academique.models import Filiere, Niveau, CourseAssignment, Evaluation, Classe, AnneeAcademique
+from academique.models import (
+    Filiere, Niveau, CourseAssignment, Evaluation, Classe, AnneeAcademique, Affectation,
+)
 from .serializers import NoteSerializer, NoteSummarySerializer, NoteFiliereSerializer
 from academique.middleware import get_current_academic_year_id
+
+
+def _to_decimal(value):
+    if value is None or value == "" or value == "null":
+        return None
+    try:
+        d = Decimal(str(value))
+        if d < 0:
+            d = Decimal("0")
+        if d > 20:
+            d = Decimal("20")
+        return d
+    except (InvalidOperation, ValueError, TypeError):
+        return None
 
 
 class NoteViewSet(viewsets.ModelViewSet):
@@ -19,19 +38,17 @@ class NoteViewSet(viewsets.ModelViewSet):
             'etudiant', 'etudiant__filiere', 'module', 'classe', 'evaluation'
         )
 
-        # Filtre global par année académique
         year_id = get_current_academic_year_id()
         if year_id:
             queryset = queryset.filter(
                 Q(annee_academique_ref_id=year_id) |
                 Q(annee_academique_ref__isnull=True, classe__annee_academique_id=year_id) |
-                Q(annee_academique_ref__isnull=True, classe__isnull=True, annee_academique=AnneeAcademique.objects.filter(pk=year_id).values_list('libelle', flat=True)[:1])
+                Q(annee_academique_ref__isnull=True, classe__isnull=True)
             )
 
         classe_id = self.request.query_params.get("classe")
         evaluation_id = self.request.query_params.get("evaluation")
 
-        # Filtre automatique si c'est un étudiant qui demande ses propres notes
         if self.request.user.is_authenticated and getattr(self.request.user, 'role', '') == 'etudiant':
             etudiant = getattr(self.request.user, 'etudiant_profile', None)
             if etudiant:
@@ -43,25 +60,32 @@ class NoteViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(evaluation_id=evaluation_id)
         return queryset
 
+    def get_serializer_class(self):
+        if self.action == "list" and self.request.query_params.get("summary") == "true":
+            return NoteSummarySerializer
+        return NoteSerializer
+
     @action(detail=False, methods=["get"], url_path="me")
     def me(self, request):
-        """Récupère les notes de l'étudiant connecté."""
         etudiant = getattr(request.user, 'etudiant_profile', None)
         if not etudiant:
             return Response({"error": "Profil étudiant introuvable"}, status=404)
 
         session = request.query_params.get("session")
         notes = Note.objects.filter(etudiant=etudiant)
-        
+
         year_id = get_current_academic_year_id()
         if year_id:
-            notes = notes.filter(classe__annee_academique_id=year_id)
+            notes = notes.filter(
+                Q(annee_academique_ref_id=year_id) |
+                Q(classe__annee_academique_id=year_id)
+            )
 
         if session:
             notes = notes.filter(session=session)
-        
+
         notes = notes.select_related("module")
-        
+
         data = []
         for note in notes:
             data.append({
@@ -77,23 +101,18 @@ class NoteViewSet(viewsets.ModelViewSet):
             })
         return Response(data)
 
-    def get_serializer_class(self):
-        if self.action == "list" and self.request.query_params.get("summary") == "true":
-            return NoteSummarySerializer
-        return NoteSerializer
-
     def list(self, request, *args, **kwargs):
         if request.query_params.get("summary") == "true":
-            notes = (
-                Note.objects
-            )
-            
             year_id = get_current_academic_year_id()
+            notes_qs = Note.objects.all()
             if year_id:
-                notes = notes.filter(classe__annee_academique_id=year_id)
+                notes_qs = notes_qs.filter(
+                    Q(annee_academique_ref_id=year_id) |
+                    Q(classe__annee_academique_id=year_id)
+                )
 
-            notes = (
-                notes.values(
+            rows = (
+                notes_qs.values(
                     "etudiant_id",
                     "etudiant__nom",
                     "etudiant__matricule",
@@ -104,7 +123,7 @@ class NoteViewSet(viewsets.ModelViewSet):
             )
 
             data = []
-            for n in notes:
+            for n in rows:
                 etudiant_id = n["etudiant_id"]
                 session = n["session"]
                 moyenne_sur_20 = Note.moyenne_etudiant(Etudiant.objects.get(pk=etudiant_id), session=session)
@@ -195,7 +214,6 @@ class NoteViewSet(viewsets.ModelViewSet):
         except Filiere.DoesNotExist:
             return Response({"error": "Filière introuvable"}, status=404)
 
-        # In the new system, modules are related to Filiere via CourseAssignment
         module_ids = CourseAssignment.objects.filter(filiere=filiere).values_list('module_id', flat=True)
         modules = Module.objects.filter(id__in=module_ids)
         etudiants = Etudiant.objects.filter(filiere_id=filiere_id).distinct()
@@ -244,12 +262,10 @@ class NoteViewSet(viewsets.ModelViewSet):
             return Response({"error": "filiere_id requis"}, status=400)
 
         try:
-            # We filter by filiere
             filiere = Filiere.objects.get(pk=filiere_id)
         except Filiere.DoesNotExist:
             return Response({"error": "Filière introuvable"}, status=404)
 
-        # In the new system, we get levels from the filiere structure (Cycle -> Niveau)
         niveaux = Niveau.objects.filter(cycle__filiere=filiere)
 
         data = {
@@ -260,7 +276,6 @@ class NoteViewSet(viewsets.ModelViewSet):
         }
 
         for niveau in niveaux:
-            # Modules assigned to this (filiere, level)
             module_ids = CourseAssignment.objects.filter(filiere=filiere, niveau=niveau).values_list('module_id', flat=True)
             modules = Module.objects.filter(id__in=module_ids)
             etudiants = Etudiant.objects.filter(inscriptions__niveau=niveau).distinct()
@@ -324,48 +339,60 @@ class NoteViewSet(viewsets.ModelViewSet):
 
         if evaluation_id:
             try:
-                evaluation = Evaluation.objects.get(pk=evaluation_id)
+                evaluation = Evaluation.objects.select_related('classe', 'module').get(pk=evaluation_id)
                 classe = evaluation.classe
                 module = evaluation.module
             except Evaluation.DoesNotExist:
                 return Response({"error": "Évaluation introuvable"}, status=404)
         elif classe_id and module_id:
             try:
-                classe = Classe.objects.get(pk=classe_id)
+                classe = Classe.objects.select_related('filiere', 'cycle', 'niveau').get(pk=classe_id)
                 module = Module.objects.get(pk=module_id)
                 evaluation = None
             except (Classe.DoesNotExist, Module.DoesNotExist):
                 return Response({"error": "Classe ou Module introuvable"}, status=404)
         else:
-            return Response({"error": "Paramètres manquants (evaluation_id ou classe_id+module_id)"}, status=400)
+            return Response({"error": "Paramètres manquants (evaluation ou classe+module)"}, status=400)
 
-        # Get all students enrolled in this class
+        # Formateur assigné à ce module pour cette classe
+        formateur_nom = ""
+        affectation = Affectation.objects.filter(
+            module=module,
+            classe=classe,
+        ).select_related('enseignant').first()
+        if affectation and affectation.enseignant:
+            formateur_nom = affectation.enseignant.nom or ""
+
+        # All students enrolled in this class
         inscriptions = Inscription.objects.filter(classe=classe).select_related('etudiant')
-        
+
         data = []
         for ins in inscriptions:
             etudiant = ins.etudiant
-            # Fetch existing note if any
+            # Look for existing note
             note_query = Note.objects.filter(etudiant=etudiant, module=module)
             if evaluation:
                 note_query = note_query.filter(evaluation=evaluation)
             else:
-                note_query = note_query.filter(classe=classe)
-            
+                note_query = note_query.filter(
+                    Q(classe=classe) | Q(classe__isnull=True)
+                )
+
             note = note_query.first()
 
             data.append({
                 "etudiant_id": etudiant.id,
                 "etudiant_nom": etudiant.nom,
-                "etudiant_matricule": etudiant.matricule,
+                "etudiant_matricule": getattr(etudiant, 'matricule', '') or '',
                 "classe_id": classe.id,
                 "module_id": module.id,
                 "evaluation_id": evaluation.id if evaluation else None,
+                "formateur_nom": formateur_nom,
                 "note_id": note.id if note else None,
-                "note_cc": note.note_cc if note else None,
-                "note_sn": note.note_sn if note else None,
-                "note_rattrapage": note.note_rattrapage if note else None,
-                "note_finale": note.note_finale if note else None,
+                "note_cc": float(note.note_cc) if note and note.note_cc is not None else None,
+                "note_sn": float(note.note_sn) if note and note.note_sn is not None else None,
+                "note_rattrapage": float(note.note_rattrapage) if note and note.note_rattrapage is not None else None,
+                "note_finale": float(note.note_finale) if note and note.note_finale is not None else None,
             })
 
         return Response(data)
@@ -376,54 +403,87 @@ class NoteViewSet(viewsets.ModelViewSet):
         if not notes_data:
             return Response({"error": "Aucune donnée fournie"}, status=400)
 
+        errors = []
         results = []
-        for item in notes_data:
-            etudiant_id = item.get("etudiant_id")
-            module_id = item.get("module_id")
-            classe_id = item.get("classe_id")
-            evaluation_id = item.get("evaluation_id")
-            
-            # Find existing note or create new one
-            defaults = {
-                "note_cc": item.get("note_cc"),
-                "note_sn": item.get("note_sn"),
-                "note_rattrapage": item.get("note_rattrapage"),
-                "classe_id": classe_id,
-                "evaluation_id": evaluation_id,
-            }
-            
-            # Filter criteria
-            filter_kwargs = {
-                "etudiant_id": etudiant_id,
-                "module_id": module_id,
-            }
-            if evaluation_id:
-                filter_kwargs["evaluation_id"] = evaluation_id
-            else:
-                filter_kwargs["classe_id"] = classe_id
-                filter_kwargs["evaluation__isnull"] = True
 
-            note, created = Note.objects.update_or_create(
-                **filter_kwargs,
-                defaults=defaults
-            )
-            results.append(NoteSerializer(note).data)
+        with transaction.atomic():
+            for idx, item in enumerate(notes_data):
+                etudiant_id = item.get("etudiant_id")
+                module_id = item.get("module_id")
+                classe_id = item.get("classe_id")
+                evaluation_id = item.get("evaluation_id") or None
 
-        return Response({"message": f"{len(results)} notes enregistrées", "data": results}, status=200)
+                if not etudiant_id or not module_id:
+                    errors.append(f"Ligne {idx+1}: etudiant_id et module_id requis")
+                    continue
+
+                note_cc = _to_decimal(item.get("note_cc"))
+                note_sn = _to_decimal(item.get("note_sn"))
+                note_rattrapage = _to_decimal(item.get("note_rattrapage"))
+
+                # Skip rows where nothing is entered
+                if note_cc is None and note_sn is None and note_rattrapage is None:
+                    continue
+
+                # Lookup existing note
+                filter_kwargs = {
+                    "etudiant_id": etudiant_id,
+                    "module_id": module_id,
+                }
+                if evaluation_id:
+                    filter_kwargs["evaluation_id"] = evaluation_id
+                else:
+                    filter_kwargs["classe_id"] = classe_id
+
+                existing = Note.objects.filter(**filter_kwargs).first()
+
+                if existing:
+                    existing.note_cc = note_cc
+                    existing.note_sn = note_sn
+                    existing.note_rattrapage = note_rattrapage
+                    if classe_id:
+                        existing.classe_id = classe_id
+                    existing.save()
+                    results.append(existing)
+                else:
+                    note = Note(
+                        etudiant_id=etudiant_id,
+                        module_id=module_id,
+                        classe_id=classe_id,
+                        evaluation_id=evaluation_id,
+                        note_cc=note_cc,
+                        note_sn=note_sn,
+                        note_rattrapage=note_rattrapage,
+                    )
+                    note.save()
+                    results.append(note)
+
+        response_data = NoteSerializer(results, many=True).data
+        resp = {"message": f"{len(results)} notes enregistrées", "data": response_data}
+        if errors:
+            resp["warnings"] = errors
+        return Response(resp, status=http_status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="details")
     def details(self, request, pk=None):
         session = request.query_params.get("session")
-
-        if not session:
-            return Response({"error": "session requis"}, status=400)
 
         try:
             etudiant = Etudiant.objects.get(pk=pk)
         except Etudiant.DoesNotExist:
             return Response({"error": "Étudiant introuvable"}, status=404)
 
-        notes = Note.objects.filter(etudiant=etudiant, session=session).select_related("module")
+        notes = Note.objects.filter(etudiant=etudiant).select_related("module", "classe")
+
+        year_id = get_current_academic_year_id()
+        if year_id:
+            notes = notes.filter(
+                Q(annee_academique_ref_id=year_id) |
+                Q(classe__annee_academique_id=year_id)
+            )
+
+        if session:
+            notes = notes.filter(session=session)
 
         data = []
         for note in notes:
@@ -433,11 +493,15 @@ class NoteViewSet(viewsets.ModelViewSet):
                 "session": note.session,
                 "module_id": note.module.id,
                 "module_nom": note.module.nom,
-                "note_cc": note.note_cc,
-                "note_sn": note.note_sn,
-                "note_rattrapage": note.note_rattrapage,
-                "note_finale": note.note_finale,
-                "note_sur_20": float(note.note_finale) if note and note.note_finale else None,
+                "module_semestre": getattr(note.module, 'semestre', '') or note.session,
+                "classe_id": note.classe_id,
+                "classe_nom": note.classe.nom if note.classe else "",
+                "formateur_nom": "",
+                "note_cc": float(note.note_cc) if note.note_cc is not None else None,
+                "note_sn": float(note.note_sn) if note.note_sn is not None else None,
+                "note_rattrapage": float(note.note_rattrapage) if note.note_rattrapage is not None else None,
+                "note_finale": float(note.note_finale) if note.note_finale is not None else None,
+                "note_sur_20": float(note.note_finale) if note.note_finale is not None else None,
             })
 
         return Response(data)
