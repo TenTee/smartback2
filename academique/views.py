@@ -194,22 +194,14 @@ class FiliereViewSet(OptimizedModelViewSet):
                 except (ValueError, TypeError):
                     levels = 0
 
-                year_id = get_current_academic_year_id()
-                annee = None
-                if year_id:
-                    annee = AnneeAcademique.objects.filter(id=year_id).first()
-                # Fallback to an active year or the latest available year if header not provided
-                if annee is None:
-                    annee = AnneeAcademique.objects.filter(est_active=True).first() or AnneeAcademique.objects.order_by('-id').first()
+                all_annees = AnneeAcademique.objects.all()
 
                 for i in range(1, levels + 1):
-                    # niveau names like "Licence 1", "Licence 2" etc.
                     niveau_nom = f"{type_cycle.nom} {i}"
                     niveau = Niveau.objects.create(cycle=cycle, nom=niveau_nom, ordre=i)
 
-                    if annee:
-                        # classe name like "Info Licence 1"
-                        classe_nom = f"{filiere.nom} {type_cycle.nom} {i}"
+                    for annee in all_annees:
+                        classe_nom = f"{filiere.nom} {type_cycle.nom} {i} ({annee.libelle})"
                         Classe.objects.update_or_create(
                             filiere=filiere,
                             cycle=cycle,

@@ -5,9 +5,6 @@ from academique.models import Filiere, Cycle, Niveau, Classe, AnneeAcademique
 
 
 def _get_target_annees():
-    années = AnneeAcademique.objects.filter(est_active=True)
-    if années.exists():
-        return années
     return AnneeAcademique.objects.all()
 
 
@@ -47,3 +44,23 @@ def on_filiere_created(sender, instance, created, **kwargs):
     for cycle in instance.cycles.all():
         for niveau in cycle.niveaux.all():
             _create_classes_for(instance, cycle, niveau)
+
+
+@receiver(post_save, sender=AnneeAcademique)
+def on_annee_academique_created(sender, instance, created, **kwargs):
+    if not created:
+        return
+    source_annee = (
+        AnneeAcademique.objects.filter(est_active=True).exclude(pk=instance.pk).first()
+        or AnneeAcademique.objects.exclude(pk=instance.pk).order_by('-libelle').first()
+    )
+    if not source_annee:
+        return
+    for classe in Classe.objects.filter(annee_academique=source_annee):
+        Classe.objects.get_or_create(
+            filiere=classe.filiere,
+            cycle=classe.cycle,
+            niveau=classe.niveau,
+            annee_academique=instance,
+            defaults={"nom": f"{classe.filiere.nom} {classe.cycle.nom} {classe.niveau.ordre} ({instance.libelle})"},
+        )
