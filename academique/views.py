@@ -71,29 +71,35 @@ class OptimizedModelViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
+
+        # Ne pas filtrer par année académique pour les actions destructrices/modificatrices
+        # afin d'éviter les 404 sur des objets existants mais d'une autre année
+        if self.action in ('destroy', 'retrieve', 'update', 'partial_update', 'reject', 'approve'):
+            return queryset
+
         year_id = get_current_academic_year_id()
-        
+
         if not year_id:
             return queryset
 
         # Mapping des champs pour filtrer par année académique selon le modèle
         model = self.queryset.model
         model_name = model.__name__
-        
+
         # 1. Filtre direct
         if hasattr(model, 'annee_academique_id') and not model_name == "Inscription":
             queryset = queryset.filter(annee_academique_id=year_id)
         elif hasattr(model, 'annee_academique_ref_id'):
             queryset = queryset.filter(annee_academique_ref_id=year_id)
-            
+
         # 2. Filtre via relation (Classe)
         elif hasattr(model, 'classe_id'):
             queryset = queryset.filter(classe__annee_academique_id=year_id)
-            
+
         # 3. Cas spécifiques (Paiement)
         elif model_name == "Paiement":
             queryset = queryset.filter(frais__classe__annee_academique_id=year_id)
-            
+
         return queryset
 
 
