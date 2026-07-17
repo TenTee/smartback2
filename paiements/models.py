@@ -108,6 +108,50 @@ class FiliereInstallmentTemplate(models.Model):
         return f"{self.policy.filiere.nom} - Tranche {self.order}"
 
 
+class ClassePaymentSchedule(models.Model):
+    """Global payment schedule for a class - applies to all students unless overridden."""
+    classe = models.OneToOneField(
+        "academique.Classe",
+        on_delete=models.CASCADE,
+        related_name="payment_schedule",
+    )
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    alert_days_before = models.PositiveSmallIntegerField(default=3)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["classe__nom"]
+
+    def __str__(self):
+        return f"Echeancier global - {self.classe.nom}"
+
+
+class ClassePaymentInstallment(models.Model):
+    """Individual installment row in a class's global schedule."""
+    schedule = models.ForeignKey(
+        ClassePaymentSchedule,
+        on_delete=models.CASCADE,
+        related_name="installments",
+    )
+    order = models.PositiveSmallIntegerField()
+    label = models.CharField(max_length=150)
+    due_date = models.DateField()
+    amount_due = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        ordering = ["order"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["schedule", "order"],
+                name="unique_classe_installment_order",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.schedule.classe.nom} - {self.label}"
+
+
 class StudentPaymentPlan(models.Model):
     STATUS_ACTIVE = "ACTIVE"
     STATUS_COMPLETED = "COMPLETED"
@@ -118,9 +162,11 @@ class StudentPaymentPlan(models.Model):
         (STATUS_CANCELLED, "Annulé"),
     ]
 
+    MODE_CUSTOM = "CUSTOM"
     MODE_CHOICES = [
         (FilierePaymentPolicy.MODE_FOUR_INSTALLMENTS, "04 tranches"),
         (FilierePaymentPolicy.MODE_MONTHLY, "Mensuel"),
+        (MODE_CUSTOM, "Personnalisé"),
     ]
 
     etudiant = models.ForeignKey(
@@ -140,6 +186,14 @@ class StudentPaymentPlan(models.Model):
         blank=True,
         related_name="student_plans",
     )
+    classe = models.ForeignKey(
+        "academique.Classe",
+        on_delete=models.CASCADE,
+        related_name="student_payment_plans",
+        null=True,
+        blank=True,
+    )
+    is_override = models.BooleanField(default=True)
     mode = models.CharField(max_length=30, choices=MODE_CHOICES)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
     monthly_start_date = models.DateField(null=True, blank=True)

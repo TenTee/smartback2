@@ -11,6 +11,8 @@ from etudiants.models import Etudiant
 from academique.middleware import get_current_academic_year_id
 
 from .models import (
+    ClassePaymentInstallment,
+    ClassePaymentSchedule,
     FilierePaymentPolicy,
     Frais,
     Paiement,
@@ -18,12 +20,15 @@ from .models import (
     StudentPaymentPlan,
 )
 from .serializers import (
+    ClassePaymentScheduleSerializer,
     FilierePaymentPolicySerializer,
     PaiementAggregatedSerializer,
     PaiementSerializer,
     PaymentAlertSerializer,
+    ResolvedScheduleSerializer,
     StudentPaymentPlanSerializer,
 )
+from .schedule_resolver import compute_student_retard
 
 
 class PaiementListCreate(generics.ListCreateAPIView):
@@ -461,3 +466,170 @@ class MePaiementSummary(APIView):
             },
             "echeances": installments
         })
+
+
+class ClassePaymentScheduleListCreateView(generics.ListCreateAPIView):
+    queryset = ClassePaymentSchedule.objects.select_related("classe").prefetch_related("installments").all()
+    serializer_class = ClassePaymentScheduleSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        year_id = get_current_academic_year_id()
+        if year_id:
+            queryset = queryset.filter(classe__annee_academique_id=year_id)
+        classe_id = self.request.query_params.get("classe")
+        if classe_id:
+            queryset = queryset.filter(classe_id=classe_id)
+        return queryset
+
+
+class ClassePaymentScheduleDetailView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = ClassePaymentSchedule.objects.select_related("classe").prefetch_related("installments").all()
+    serializer_class = ClassePaymentScheduleSerializer
+
+
+class StudentResolvedScheduleView(APIView):
+    """Get the resolved schedule (global or personal) for a student with retard status."""
+
+    def get(self, request, etudiant_id):
+        try:
+            etudiant = Etudiant.objects.get(pk=etudiant_id)
+        except Etudiant.DoesNotExist:
+            return Response({"error": "Etudiant introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        year_id = get_current_academic_year_id()
+        from etudiants.models import Inscription
+        if year_id:
+            inscription = Inscription.objects.filter(
+                etudiant=etudiant, annee_academique_ref_id=year_id
+            ).select_related("classe").first()
+        else:
+            inscription = Inscription.objects.filter(
+                etudiant=etudiant
+            ).select_related("classe").order_by("-date_inscription").first()
+
+        if not inscription or not inscription.classe:
+            return Response({
+                "source": None,
+                "installments": [],
+                "total_due": 0,
+                "total_paid": 0,
+                "is_overdue": False,
+                "overdue_amount": 0,
+                "overdue_days": 0,
+            })
+
+        result = compute_student_retard(etudiant, inscription.classe)
+        serializer = ResolvedScheduleSerializer(result)
+        return Response(serializer.data)
+
+
+class StudentScheduleOverrideView(APIView):
+    """Create or delete a personal schedule override for a student."""
+
+    def post(self, request, etudiant_id):
+        try:
+            etudiant = Etudiant.objects.get(pk=etudiant_id)
+        except Etudiant.DoesNotExist:
+            return Response({"error": "Etudiant introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        year_id = get_current_academic_year_id()
+        from etudiants.models import Inscription
+        if year_id:
+            inscription = Inscription.objects.filter(
+                etudiant=etudiant, annee_academique_ref_id=year_id
+            ).select_related("classe").first()
+        else:
+            inscription = Inscription.objects.filter(
+                etudiant=etudiant
+            ).select_related("classe").order_by("-date_inscription").first()
+
+        if not inscription or not inscription.classe:
+            return Response({"error": "Aucune inscription/classe trouvee"}, status=status.HTTP_400_BAD_REQUEST)
+
+        classe = inscription.classe
+        installments_data = request.data.get("installments", [])
+        total_amount = request.data.get("total_amount")
+
+        if not installments_data:
+            return Response({"error": "Les tranches sont requises"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not total_amount:
+            total_amount = sum(Decimal(str(i.get("amount_due", 0))) for i in installments_data)
+
+        from .models import StudentPaymentPlan, StudentPaymentInstallment
+
+        # Delete existing override if any
+        StudentPaymentPlan.objects.filter(
+            etudiant=etudiant, classe=classe, is_override=True
+        ).delete()
+
+        plan = StudentPaymentPlan.objects.create(
+            etudiant=etudiant,
+            filiere=etudiant.filiere,
+            classe=classe,
+            is_override=True,
+            mode="CUSTOM",
+            total_amount=total_amount,
+            status=StudentPaymentPlan.STATUS_ACTIVE,
+        )
+
+        for item in installments_data:
+            StudentPaymentInstallment.objects.create(
+                plan=plan,
+                order=item["order"],
+                label=item["label"],
+                due_date=item["due_date"],
+                amount_due=item["amount_due"],
+            )
+
+        # Distribute existing payments to the new plan
+        from .models import Paiement
+        total_paid = Paiement.objects.filter(
+            etudiant=etudiant, paiement_type="FORMATION"
+        ).aggregate(total=Sum("montant_paye"))["total"] or Decimal("0")
+
+        remaining = total_paid
+        for inst in plan.installments.all().order_by("due_date", "order"):
+            if remaining <= 0:
+                break
+            applied = min(inst.amount_due, remaining)
+            inst.amount_paid = applied
+            inst.save()
+            remaining -= applied
+
+        result = compute_student_retard(etudiant, classe)
+        serializer = ResolvedScheduleSerializer(result)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def delete(self, request, etudiant_id):
+        try:
+            etudiant = Etudiant.objects.get(pk=etudiant_id)
+        except Etudiant.DoesNotExist:
+            return Response({"error": "Etudiant introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        year_id = get_current_academic_year_id()
+        from etudiants.models import Inscription
+        if year_id:
+            inscription = Inscription.objects.filter(
+                etudiant=etudiant, annee_academique_ref_id=year_id
+            ).select_related("classe").first()
+        else:
+            inscription = Inscription.objects.filter(
+                etudiant=etudiant
+            ).select_related("classe").order_by("-date_inscription").first()
+
+        if not inscription or not inscription.classe:
+            return Response({"error": "Aucune inscription/classe trouvee"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .models import StudentPaymentPlan
+        deleted_count, _ = StudentPaymentPlan.objects.filter(
+            etudiant=etudiant, classe=inscription.classe, is_override=True
+        ).delete()
+
+        if deleted_count == 0:
+            return Response({"message": "Aucun echeancier personnalise a supprimer"}, status=status.HTTP_404_NOT_FOUND)
+
+        result = compute_student_retard(etudiant, inscription.classe)
+        serializer = ResolvedScheduleSerializer(result)
+        return Response(serializer.data)

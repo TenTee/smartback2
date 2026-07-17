@@ -2,6 +2,8 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from .models import (
+    ClassePaymentInstallment,
+    ClassePaymentSchedule,
     FiliereInstallmentTemplate,
     FilierePaymentPolicy,
     Paiement,
@@ -211,3 +213,45 @@ class PaymentAlertSerializer(serializers.Serializer):
     status = serializers.CharField()
     severity = serializers.CharField()
     message = serializers.CharField()
+
+
+class ClassePaymentInstallmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClassePaymentInstallment
+        fields = ["id", "order", "label", "due_date", "amount_due"]
+
+
+class ClassePaymentScheduleSerializer(serializers.ModelSerializer):
+    installments = ClassePaymentInstallmentSerializer(many=True)
+    classe_nom = serializers.CharField(source="classe.nom", read_only=True)
+
+    class Meta:
+        model = ClassePaymentSchedule
+        fields = ["id", "classe", "classe_nom", "total_amount", "alert_days_before", "installments", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def create(self, validated_data):
+        installments_data = validated_data.pop("installments", [])
+        schedule = ClassePaymentSchedule.objects.create(**validated_data)
+        for item in installments_data:
+            ClassePaymentInstallment.objects.create(schedule=schedule, **item)
+        return schedule
+
+    def update(self, instance, validated_data):
+        installments_data = validated_data.pop("installments", None)
+        instance = super().update(instance, validated_data)
+        if installments_data is not None:
+            instance.installments.all().delete()
+            for item in installments_data:
+                ClassePaymentInstallment.objects.create(schedule=instance, **item)
+        return instance
+
+
+class ResolvedScheduleSerializer(serializers.Serializer):
+    source = serializers.CharField(allow_null=True)
+    installments = serializers.ListField(child=serializers.DictField())
+    total_due = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_paid = serializers.DecimalField(max_digits=10, decimal_places=2)
+    is_overdue = serializers.BooleanField()
+    overdue_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    overdue_days = serializers.IntegerField()

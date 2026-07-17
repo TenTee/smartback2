@@ -1,16 +1,20 @@
 from django.urls import path
 
 from .views import (
+    ClassePaymentScheduleDetailView,
+    ClassePaymentScheduleListCreateView,
     FilierePaymentPolicyDetailView,
     FilierePaymentPolicyListCreateView,
     FinancialDashboardView,
+    MePaiementSummary,
     PaiementAggregated,
     PaiementDetail,
     PaiementListCreate,
     PaymentAlertListView,
     StudentPaymentPlanDetailView,
     StudentPaymentPlanListCreateView,
-    MePaiementSummary,
+    StudentResolvedScheduleView,
+    StudentScheduleOverrideView,
 )
 
 urlpatterns = [
@@ -24,4 +28,8 @@ urlpatterns = [
     path("paiements/plans/", StudentPaymentPlanListCreateView.as_view(), name="student-payment-plan-list"),
     path("paiements/plans/<int:pk>/", StudentPaymentPlanDetailView.as_view(), name="student-payment-plan-detail"),
     path("paiements/alerts/", PaymentAlertListView.as_view(), name="payment-alert-list"),
+    path("paiements/class-schedules/", ClassePaymentScheduleListCreateView.as_view(), name="class-schedule-list"),
+    path("paiements/class-schedules/<int:pk>/", ClassePaymentScheduleDetailView.as_view(), name="class-schedule-detail"),
+    path("paiements/student-schedule/<int:etudiant_id>/", StudentResolvedScheduleView.as_view(), name="student-resolved-schedule"),
+    path("paiements/student-schedule/<int:etudiant_id>/override/", StudentScheduleOverrideView.as_view(), name="student-schedule-override"),
 ]
