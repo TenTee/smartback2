@@ -7,29 +7,31 @@ from users.models import CustomUser
 @receiver(post_save, sender=Etudiant)
 def create_user_for_etudiant(sender, instance, created, **kwargs):
     """
-    ✅ Lorsqu'un étudiant est créé :
+    Lorsqu'un étudiant est créé :
     - Création automatique d'un compte utilisateur (CustomUser)
     - Association du compte à l'étudiant
     - Stockage du mot de passe initial pour l'administrateur
     """
     if created and not instance.user:
-        # Extraire nom et prénom (simplifié)
         parts = instance.nom.split(' ', 1)
         nom = parts[0]
         prenom = parts[1] if len(parts) > 1 else ""
 
-        # Création de l'utilisateur
-        user = CustomUser.objects.create(
-            noms=nom,
-            prenoms=prenom,
-            email=instance.email,
-            role="etudiant" # Rôle spécifique
-        )
-        
-        # Récupération du mot de passe brut (généré dans le save() de CustomUser)
-        raw_password = getattr(user, '_raw_password', None)
-        
-        # Mise à jour de l'étudiant
+        clean_email = (instance.email or "").strip().lower()
+        existing_user = CustomUser.objects.filter(email__iexact=clean_email).first()
+
+        if existing_user:
+            user = existing_user
+            raw_password = None
+        else:
+            user = CustomUser.objects.create(
+                noms=nom,
+                prenoms=prenom,
+                email=clean_email,
+                role="etudiant",
+            )
+            raw_password = getattr(user, '_raw_password', None)
+
         instance.user = user
         instance.initial_password = raw_password
         instance.save(update_fields=['user', 'initial_password'])
