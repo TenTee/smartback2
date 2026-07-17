@@ -574,12 +574,16 @@ class StudentScheduleOverrideView(APIView):
             status=StudentPaymentPlan.STATUS_ACTIVE,
         )
 
+        from datetime import date as date_type
+        from django.utils.dateparse import parse_date
         for item in installments_data:
+            raw_date = item["due_date"]
+            due_date = raw_date if isinstance(raw_date, date_type) else parse_date(str(raw_date))
             StudentPaymentInstallment.objects.create(
                 plan=plan,
                 order=item["order"],
                 label=item["label"],
-                due_date=item["due_date"],
+                due_date=due_date,
                 amount_due=item["amount_due"],
             )
 
