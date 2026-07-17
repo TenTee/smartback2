@@ -481,12 +481,13 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                 if not preinscription.filiere_souhaitee or not preinscription.niveau_souhaite:
                     return Response({"error": "Filière ou niveau manquant sur la pré-inscription."}, status=400)
 
-                etudiant = Etudiant.objects.filter(email=preinscription.email).first()
+                clean_email = (preinscription.email or "").strip().lower()
+                etudiant = Etudiant.objects.filter(email__iexact=clean_email).first()
                 if not etudiant:
                     etudiant = Etudiant.objects.create(
                         nom=f"{preinscription.nom_candidat} {preinscription.prenom_candidat}".strip(),
                         contact=preinscription.telephone,
-                        email=preinscription.email,
+                        email=clean_email,
                         filiere=preinscription.filiere_souhaitee,
                         nom_parent=preinscription.nom_parent or "",
                         whatsapp_parent=preinscription.whatsapp_parent or "",
