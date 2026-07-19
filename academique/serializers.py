@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from emploidutemps.models import EmploiDuTemps
-from etudiants.models import Inscription
+from etudiants.models import Etudiant, Inscription
 from modules.models import Module
 from notes.models import Note
 from paiements.models import Frais, Paiement
@@ -631,26 +631,34 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         if not self.instance:
+            if Etudiant.objects.filter(email__iexact=value).exists():
+                raise serializers.ValidationError(
+                    "Un étudiant avec cet email est déjà inscrit."
+                )
             existing = PreInscription.objects.filter(
                 email__iexact=value,
-                statut__in=["EN_ATTENTE", "APPROUVEE"],
+                statut="EN_ATTENTE",
             ).exists()
             if existing:
                 raise serializers.ValidationError(
-                    "Une pré-inscription avec cet email existe déjà. "
+                    "Une pré-inscription avec cet email est déjà en cours de traitement. "
                     "Veuillez patienter pendant le traitement de votre dossier."
                 )
         return value
 
     def validate_telephone(self, value):
         if not self.instance:
+            if Etudiant.objects.filter(contact=value).exists():
+                raise serializers.ValidationError(
+                    "Un étudiant avec ce numéro de téléphone est déjà inscrit."
+                )
             existing = PreInscription.objects.filter(
                 telephone=value,
-                statut__in=["EN_ATTENTE", "APPROUVEE"],
+                statut="EN_ATTENTE",
             ).exists()
             if existing:
                 raise serializers.ValidationError(
-                    "Une pré-inscription avec ce numéro de téléphone existe déjà. "
+                    "Une pré-inscription avec ce numéro de téléphone est déjà en cours de traitement. "
                     "Veuillez patienter pendant le traitement de votre dossier."
                 )
         return value

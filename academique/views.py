@@ -572,6 +572,8 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                             moyen_paiement="cash",
                         )
 
+                preinscription.delete()
+
                 return Response({
                     "message": "Pré-inscription approuvée et synchronisée.",
                     "etudiant_id": etudiant.id,
@@ -585,8 +587,7 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
         preinscription = self.get_object()
         if preinscription.statut != "EN_ATTENTE":
             return Response({"error": "Seules les pré-inscriptions en attente peuvent être rejetées."}, status=400)
-        preinscription.statut = "REJETEE"
-        preinscription.save()
+        preinscription.delete()
         return Response({"message": "Pré-inscription rejetée."})
 
     def get_permissions(self):
