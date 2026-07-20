@@ -699,6 +699,7 @@ class NoteViewSet(viewsets.ModelViewSet):
             "etablissement": {
                 "nom": config.nom,
                 "logo": config.logo.url if config.logo else None,
+                "logo_entete": config.logo_entete.url if config.logo_entete else None,
                 "adresse": config.adresse,
                 "ville": config.ville,
                 "telephone": config.telephone,
