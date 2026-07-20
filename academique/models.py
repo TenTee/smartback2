@@ -65,6 +65,9 @@ class ConfigurationEtablissement(TimeStampedModel):
     couleur_texte = models.CharField(max_length=20, default="#333333", blank=True)
     typographie = models.CharField(max_length=100, default="'Inter', sans-serif")
 
+    # Slogan
+    slogan = models.CharField(max_length=255, blank=True, default="Former aujourd'hui, construire demain.")
+
     # Direction
     nom_directeur = models.CharField(max_length=255, blank=True)
     titre_directeur = models.CharField(max_length=255, blank=True, default="Le Directeur Général")
