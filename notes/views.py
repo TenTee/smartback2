@@ -508,9 +508,7 @@ class NoteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="releve-notes")
     def releve_notes(self, request, pk=None):
-        """Endpoint dédié pour générer le relevé de notes complet d'un étudiant."""
-        session = request.query_params.get("session")
-
+        """Endpoint dédié pour générer le relevé de notes complet d'un étudiant (les 2 semestres)."""
         try:
             etudiant = Etudiant.objects.get(pk=pk)
         except Etudiant.DoesNotExist:
@@ -535,9 +533,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                 Q(annee_academique_ref_id=year_id) |
                 Q(classe__annee_academique_id=year_id)
             )
-
-        if session:
-            notes_qs = notes_qs.filter(session=session)
 
         photo_doc = None
         try:
@@ -580,46 +575,91 @@ class NoteViewSet(viewsets.ModelViewSet):
                 return "Passable"
             return "Non validé"
 
-        notes_data = []
-        total_credits = 0
-        credits_obtenus = 0
-        credits_valides = 0
-        total_points_weighted = 0.0
-        total_coeff = 0
+        def get_mention(moyenne):
+            if moyenne is None:
+                return "-"
+            if moyenne >= 16:
+                return "Très Bien"
+            elif moyenne >= 14:
+                return "Bien"
+            elif moyenne >= 12:
+                return "Assez Bien"
+            elif moyenne >= 10:
+                return "Passable"
+            return "Échec"
 
-        for note in notes_qs:
-            module = note.module
-            credits = getattr(module, 'credits', 3) or 3
-            coeff = getattr(module, 'coefficient', 1) or 1
-            note_finale = float(note.note_finale) if note.note_finale is not None else None
+        def compute_semester_data(semester_notes):
+            notes_list = []
+            total_credits = 0
+            credits_obtenus = 0
+            credits_valides = 0
+            total_points_weighted = 0.0
+            total_coeff = 0
 
-            total_credits += credits
-            if note_finale is not None:
-                credits_obtenus += credits
-                if note_finale >= 10:
-                    credits_valides += credits
-                total_points_weighted += note_finale * coeff
-                total_coeff += coeff
+            for note in semester_notes:
+                module = note.module
+                credits = getattr(module, 'credits', 3) or 3
+                coeff = getattr(module, 'coefficient', 1) or 1
+                note_finale = float(note.note_finale) if note.note_finale is not None else None
 
-            notes_data.append({
-                "id": note.id,
-                "code_ue": getattr(module, 'code_ue', '') or '',
-                "module_nom": module.nom,
-                "credits": credits,
-                "note_cc": float(note.note_cc) if note.note_cc is not None else None,
-                "note_sn": float(note.note_sn) if note.note_sn is not None else None,
-                "note_finale": note_finale,
-                "grade": get_grade(note.note_finale),
-                "observation": get_observation(note.note_finale),
-                "session": note.session,
-                "module_semestre": getattr(module, 'semestre', '') or note.session,
-            })
+                total_credits += credits
+                if note_finale is not None:
+                    credits_obtenus += credits
+                    if note_finale >= 10:
+                        credits_valides += credits
+                    total_points_weighted += note_finale * coeff
+                    total_coeff += coeff
 
-        moyenne_semestre = round(total_points_weighted / total_coeff, 2) if total_coeff > 0 else None
+                notes_list.append({
+                    "id": note.id,
+                    "code_ue": getattr(module, 'code_ue', '') or '',
+                    "module_nom": module.nom,
+                    "credits": credits,
+                    "note_cc": float(note.note_cc) if note.note_cc is not None else None,
+                    "note_sn": float(note.note_sn) if note.note_sn is not None else None,
+                    "note_finale": note_finale,
+                    "grade": get_grade(note.note_finale),
+                    "observation": get_observation(note.note_finale),
+                })
+
+            moyenne = round(total_points_weighted / total_coeff, 2) if total_coeff > 0 else None
+            return {
+                "notes": notes_list,
+                "moyenne": moyenne,
+                "total_credits": total_credits,
+                "credits_obtenus": credits_obtenus,
+                "credits_valides": credits_valides,
+            }
+
+        semestres_data = []
+        global_credits = 0
+        global_credits_obtenus = 0
+        global_credits_valides = 0
+        global_points = 0.0
+        global_coeff = 0
+
+        for session_label in ["Semestre 1", "Semestre 2"]:
+            sem_notes = notes_qs.filter(session=session_label)
+            if not sem_notes.exists():
+                continue
+            sem_data = compute_semester_data(sem_notes)
+            sem_data["session"] = session_label
+            semestres_data.append(sem_data)
+
+            global_credits += sem_data["total_credits"]
+            global_credits_obtenus += sem_data["credits_obtenus"]
+            global_credits_valides += sem_data["credits_valides"]
+            for note in sem_notes:
+                if note.note_finale is not None:
+                    coeff = getattr(note.module, 'coefficient', 1) or 1
+                    global_points += float(note.note_finale) * coeff
+                    global_coeff += coeff
+
+        moyenne_annuelle = round(global_points / global_coeff, 2) if global_coeff > 0 else None
 
         effectif = 0
         rang = None
-        if inscription and inscription.classe_id and session:
+        if inscription and inscription.classe_id:
             classe_etudiants = list(Inscription.objects.filter(
                 classe=inscription.classe
             ).values_list('etudiant_id', flat=True))
@@ -627,9 +667,7 @@ class NoteViewSet(viewsets.ModelViewSet):
 
             moyennes_classe = []
             for etu_id in classe_etudiants:
-                etu_notes = Note.objects.filter(
-                    etudiant_id=etu_id, session=session
-                ).select_related("module")
+                etu_notes = Note.objects.filter(etudiant_id=etu_id).select_related("module")
                 if year_id:
                     etu_notes = etu_notes.filter(
                         Q(annee_academique_ref_id=year_id) |
@@ -650,19 +688,6 @@ class NoteViewSet(viewsets.ModelViewSet):
                 if item["etudiant_id"] == etudiant.id:
                     rang = idx
                     break
-
-        def get_mention(moyenne):
-            if moyenne is None:
-                return "-"
-            if moyenne >= 16:
-                return "Très Bien"
-            elif moyenne >= 14:
-                return "Bien"
-            elif moyenne >= 12:
-                return "Assez Bien"
-            elif moyenne >= 10:
-                return "Passable"
-            return "Échec"
 
         annee_academique = ""
         if inscription and inscription.classe:
@@ -699,18 +724,17 @@ class NoteViewSet(viewsets.ModelViewSet):
             "parametres": {
                 "pourcentage_cc": params.pourcentage_cc,
                 "pourcentage_sn": params.pourcentage_sn,
-                "session": session or "Semestre 1",
                 "annee_academique": annee_academique,
             },
-            "notes": notes_data,
+            "semestres": semestres_data,
             "resume": {
-                "moyenne_semestre": moyenne_semestre,
-                "credits_obtenus": credits_obtenus,
-                "total_credits": total_credits,
-                "credits_valides": credits_valides,
+                "moyenne_annuelle": moyenne_annuelle,
+                "credits_obtenus": global_credits_obtenus,
+                "total_credits": global_credits,
+                "credits_valides": global_credits_valides,
                 "rang": rang,
                 "effectif": effectif,
-                "mention": get_mention(moyenne_semestre),
+                "mention": get_mention(moyenne_annuelle),
             },
         }
 
