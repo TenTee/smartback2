@@ -56,11 +56,16 @@ class FormateurPortalSerializer(serializers.ModelSerializer):
     def get_classes(self, obj):
         from academique.models import Affectation
         from emploidutemps.models import EmploiDuTemps
+        from academique.middleware import get_current_academic_year_id
 
+        annee_id = get_current_academic_year_id()
         seen = set()
         result = []
 
-        for a in Affectation.objects.filter(enseignant=obj).select_related('classe', 'module'):
+        aff_qs = Affectation.objects.filter(enseignant=obj)
+        if annee_id:
+            aff_qs = aff_qs.filter(classe__annee_academique_id=annee_id)
+        for a in aff_qs.select_related('classe', 'module'):
             key = (a.classe.id, a.module.id)
             if key not in seen:
                 seen.add(key)
@@ -71,7 +76,10 @@ class FormateurPortalSerializer(serializers.ModelSerializer):
                     'module_nom': a.module.nom,
                 })
 
-        for edt in EmploiDuTemps.objects.filter(formateur=obj).select_related('classe', 'module'):
+        edt_qs = EmploiDuTemps.objects.filter(formateur=obj)
+        if annee_id:
+            edt_qs = edt_qs.filter(classe__annee_academique_id=annee_id)
+        for edt in edt_qs.select_related('classe', 'module'):
             if edt.classe and edt.module:
                 key = (edt.classe.id, edt.module.id)
                 if key not in seen:

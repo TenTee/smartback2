@@ -126,16 +126,22 @@ class FormateurPortalViewSet(viewsets.ViewSet):
         serializer = FormateurPortalSerializer(formateur, context={'request': request})
         return Response(serializer.data)
 
-    def _get_classe_module_pairs(self, formateur):
+    def _get_classe_module_pairs(self, formateur, annee_id=None):
         from academique.models import Affectation
         from emploidutemps.models import EmploiDuTemps
 
         pairs = set()
 
-        for aff in Affectation.objects.filter(enseignant=formateur).select_related('classe', 'module'):
+        aff_qs = Affectation.objects.filter(enseignant=formateur)
+        if annee_id:
+            aff_qs = aff_qs.filter(classe__annee_academique_id=annee_id)
+        for aff in aff_qs.select_related('classe', 'module'):
             pairs.add((aff.classe, aff.module))
 
-        for edt in EmploiDuTemps.objects.filter(formateur=formateur).select_related('classe', 'module'):
+        edt_qs = EmploiDuTemps.objects.filter(formateur=formateur)
+        if annee_id:
+            edt_qs = edt_qs.filter(classe__annee_academique_id=annee_id)
+        for edt in edt_qs.select_related('classe', 'module'):
             if edt.classe and edt.module:
                 pairs.add((edt.classe, edt.module))
 
@@ -151,13 +157,15 @@ class FormateurPortalViewSet(viewsets.ViewSet):
         from academique.middleware import get_current_academic_year_id
 
         annee_id = get_current_academic_year_id()
-        pairs = self._get_classe_module_pairs(formateur)
+        pairs = self._get_classe_module_pairs(formateur, annee_id=annee_id)
 
         result = []
         for classe, module in pairs:
             inscriptions = Inscription.objects.filter(classe=classe)
             if annee_id:
-                inscriptions = inscriptions.filter(annee_academique_id=annee_id)
+                inscriptions = inscriptions.filter(
+                    Q(annee_academique_ref_id=annee_id) | Q(annee_academique_ref__isnull=True)
+                )
 
             etudiants = []
             for insc in inscriptions.select_related('etudiant'):
@@ -188,8 +196,12 @@ class FormateurPortalViewSet(viewsets.ViewSet):
 
         from emploidutemps.models import EmploiDuTemps
         from emploidutemps.serializers import EmploiDuTempsSerializer
+        from academique.middleware import get_current_academic_year_id
 
+        annee_id = get_current_academic_year_id()
         schedules = EmploiDuTemps.objects.filter(formateur=formateur)
+        if annee_id:
+            schedules = schedules.filter(classe__annee_academique_id=annee_id)
         serializer = EmploiDuTempsSerializer(schedules, many=True)
         return Response(serializer.data)
 
@@ -200,11 +212,13 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             return Response({"detail": "Profil formateur introuvable."}, status=404)
 
         from notes.models import Note
+        from academique.middleware import get_current_academic_year_id
 
         module_id = request.query_params.get('module_id')
         classe_id = request.query_params.get('classe_id')
 
-        pairs = self._get_classe_module_pairs(formateur)
+        annee_id = get_current_academic_year_id()
+        pairs = self._get_classe_module_pairs(formateur, annee_id=annee_id)
         module_ids = set(m.id for _, m in pairs)
         classe_ids = set(c.id for c, _ in pairs)
 
@@ -245,12 +259,14 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             return Response({"detail": "Profil formateur introuvable."}, status=404)
 
         from notes.models import Note
+        from academique.middleware import get_current_academic_year_id
 
         notes_data = request.data.get('notes', [])
         if not notes_data:
             return Response({"detail": "Aucune note fournie."}, status=400)
 
-        pairs = self._get_classe_module_pairs(formateur)
+        annee_id = get_current_academic_year_id()
+        pairs = self._get_classe_module_pairs(formateur, annee_id=annee_id)
         allowed_module_ids = set(m.id for _, m in pairs)
 
         created_count = 0
@@ -296,9 +312,15 @@ class FormateurPortalViewSet(viewsets.ViewSet):
 
         from emploidutemps.models import EmploiDuTemps
         from notes.models import Note
+        from academique.middleware import get_current_academic_year_id
 
-        total_cours = EmploiDuTemps.objects.filter(formateur=formateur).count()
-        pairs = self._get_classe_module_pairs(formateur)
+        annee_id = get_current_academic_year_id()
+
+        edt_qs = EmploiDuTemps.objects.filter(formateur=formateur)
+        if annee_id:
+            edt_qs = edt_qs.filter(classe__annee_academique_id=annee_id)
+        total_cours = edt_qs.count()
+        pairs = self._get_classe_module_pairs(formateur, annee_id=annee_id)
 
         module_ids = set(m.id for _, m in pairs)
         classe_ids = set(c.id for c, _ in pairs)
