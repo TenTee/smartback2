@@ -21,6 +21,7 @@ from .models import (
     Niveau,
     ParametresGlobaux,
     PreInscription,
+    PreInscriptionDocument,
     Semestre,
     UniversiteTutelle,
 )
@@ -589,11 +590,19 @@ class AcademicEmploiDuTempsSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
+class PreInscriptionDocumentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PreInscriptionDocument
+        fields = ["id", "fichier", "type_document", "date_upload"]
+        read_only_fields = ["id", "date_upload"]
+
+
 class PreInscriptionSerializer(serializers.ModelSerializer):
     filiere_souhaitee_nom = serializers.CharField(source="filiere_souhaitee.nom", read_only=True)
     cycle_souhaite_nom = serializers.CharField(source="cycle_souhaite.nom", read_only=True)
     niveau_souhaite_nom = serializers.CharField(source="niveau_souhaite.nom", read_only=True)
     name = serializers.CharField(read_only=True)
+    documents = PreInscriptionDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = PreInscription
@@ -605,6 +614,7 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "prenom_candidat",
             "email",
             "telephone",
+            "date_naissance",
             "filiere_souhaitee",
             "filiere_souhaitee_nom",
             "cycle_souhaite",
@@ -616,6 +626,7 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "message",
             "nom_parent",
             "whatsapp_parent",
+            "documents",
             "created_at",
             "updated_at",
         ]
@@ -627,6 +638,7 @@ class PreInscriptionSerializer(serializers.ModelSerializer):
             "filiere_souhaitee_nom",
             "cycle_souhaite_nom",
             "niveau_souhaite_nom",
+            "documents",
         ]
 
     def validate_email(self, value):

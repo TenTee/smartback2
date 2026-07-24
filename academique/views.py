@@ -17,7 +17,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from emploidutemps.models import EmploiDuTemps
-from etudiants.models import Etudiant, Inscription
+from etudiants.models import Etudiant, EtudiantDocument, Inscription
 from modules.models import Module
 from notes.models import Note
 from paiements.models import Frais, Paiement
@@ -37,6 +37,7 @@ from .models import (
     Niveau,
     ParametresGlobaux,
     PreInscription,
+    PreInscriptionDocument,
     Semestre,
     UniversiteTutelle,
 )
@@ -459,13 +460,42 @@ class AcademicEmploiDuTempsViewSet(OptimizedModelViewSet):
 
 
 class PreInscriptionViewSet(OptimizedModelViewSet):
-    queryset = PreInscription.objects.select_related("filiere_souhaitee", "cycle_souhaite", "niveau_souhaite", "annee_academique").all()
+    from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    queryset = PreInscription.objects.select_related("filiere_souhaitee", "cycle_souhaite", "niveau_souhaite", "annee_academique").prefetch_related("documents").all()
     serializer_class = PreInscriptionSerializer
     filterset_fields = ("statut", "filiere_souhaitee", "cycle_souhaite", "niveau_souhaite")
 
+    def get_permissions(self):
+        if self.action == "create":
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
+
     def perform_create(self, serializer):
         annee = AnneeAcademique.objects.filter(est_active=True).first()
-        serializer.save(annee_academique=annee)
+        pre_inscription = serializer.save(annee_academique=annee)
+
+        document_fields = {
+            "photo": "Photo d'identité",
+            "acte_naissance": "Acte de naissance",
+            "cni": "CNI / Passeport",
+        }
+        for field_name, type_doc in document_fields.items():
+            file = self.request.FILES.get(field_name)
+            if file:
+                PreInscriptionDocument.objects.create(
+                    pre_inscription=pre_inscription,
+                    fichier=file,
+                    type_document=type_doc,
+                )
+
+        diplomes = self.request.FILES.getlist("diplomes")
+        for diplome in diplomes:
+            PreInscriptionDocument.objects.create(
+                pre_inscription=pre_inscription,
+                fichier=diplome,
+                type_document="Diplôme précédent",
+            )
 
     search_fields = ("nom_candidat", "prenom_candidat", "email", "telephone")
     ordering = ("-created_at",)
@@ -488,6 +518,7 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                         nom=f"{preinscription.nom_candidat} {preinscription.prenom_candidat}".strip(),
                         contact=preinscription.telephone,
                         email=clean_email,
+                        date_naissance=preinscription.date_naissance,
                         filiere=preinscription.filiere_souhaitee,
                         nom_parent=preinscription.nom_parent or "",
                         whatsapp_parent=preinscription.whatsapp_parent or "",
@@ -498,8 +529,17 @@ class PreInscriptionViewSet(OptimizedModelViewSet):
                     etudiant.nom_parent = preinscription.nom_parent or etudiant.nom_parent
                     etudiant.whatsapp_parent = preinscription.whatsapp_parent or etudiant.whatsapp_parent
                     etudiant.contact = preinscription.telephone or etudiant.contact
+                    if preinscription.date_naissance:
+                        etudiant.date_naissance = preinscription.date_naissance
                     etudiant.statut = "Inscrit"
                     etudiant.save()
+
+                for doc in preinscription.documents.all():
+                    EtudiantDocument.objects.create(
+                        etudiant=etudiant,
+                        fichier=doc.fichier,
+                        type_document=doc.type_document,
+                    )
 
                 year = None
                 year_id = get_current_academic_year_id()

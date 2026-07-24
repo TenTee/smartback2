@@ -393,6 +393,7 @@ class PreInscription(NamedDescriptionModel):
     annee_academique = models.ForeignKey(
         "AnneeAcademique", on_delete=models.SET_NULL, null=True, blank=True, related_name="pre_inscriptions"
     )
+    date_naissance = models.DateField(null=True, blank=True, verbose_name="Date de naissance")
     statut = models.CharField(max_length=20, choices=STATUS_CHOICES, default="EN_ATTENTE")
     bulletin = models.FileField(upload_to="pre_inscriptions/bulletins/", null=True, blank=True)
     message = models.TextField(blank=True)
@@ -408,6 +409,18 @@ class PreInscription(NamedDescriptionModel):
 
     def __str__(self):
         return f"{self.nom_candidat} {self.prenom_candidat} - {self.statut}"
+
+
+class PreInscriptionDocument(models.Model):
+    pre_inscription = models.ForeignKey(
+        PreInscription, on_delete=models.CASCADE, related_name="documents"
+    )
+    fichier = models.FileField(upload_to="pre_inscriptions/documents/")
+    type_document = models.CharField(max_length=50, blank=True)
+    date_upload = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.pre_inscription} - {self.type_document or 'Document'}"
 
 
 class Epreuve(NamedDescriptionModel):
