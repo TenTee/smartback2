@@ -35,6 +35,7 @@ class Prime(models.Model):
         ("risque", "Prime de risque"),
         ("panier", "Prime de panier"),
         ("heures_sup", "Heures supplémentaires"),
+        ("commission", "Commission"),
         ("autre", "Autre"),
     ]
 

@@ -109,6 +109,7 @@ class GenererCampagneView(APIView):
         annee = request.data.get('annee')
         heures_formateurs = request.data.get('heures_formateurs', [])
         type_beneficiaire = request.data.get('type_beneficiaire')
+        bulletins_data = request.data.get('bulletins')
 
         if not mois or not annee:
             return Response({"error": "mois et annee sont requis"}, status=status.HTTP_400_BAD_REQUEST)
@@ -123,17 +124,22 @@ class GenererCampagneView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        campagne = CampagnePaie.objects.create(mois=mois, annee=annee, type_beneficiaire=camp_type)
+
+        personnel_ct = ContentType.objects.get_for_model(Personnel)
+        formateur_ct = ContentType.objects.get_for_model(Formateur)
+
+        if bulletins_data:
+            return self._generer_avec_bulletins(
+                request, campagne, personnel_ct, mois, annee
+            )
+
         heures_map = {}
         for entry in heures_formateurs:
             fid = entry.get('formateur_id')
             h = entry.get('heures', 0)
             if fid and h:
                 heures_map[int(fid)] = Decimal(str(h))
-
-        campagne = CampagnePaie.objects.create(mois=mois, annee=annee, type_beneficiaire=camp_type)
-
-        personnel_ct = ContentType.objects.get_for_model(Personnel)
-        formateur_ct = ContentType.objects.get_for_model(Formateur)
 
         total_brut = Decimal('0')
         total_primes_camp = Decimal('0')
@@ -228,6 +234,85 @@ class GenererCampagneView(APIView):
             total_brut += bulletin.salaire_brut
             total_primes_camp += sum_primes
             total_retenues_camp += sum_retenues
+            total_net += bulletin.salaire_net
+            count += 1
+
+        campagne.total_brut = total_brut
+        campagne.total_primes = total_primes_camp
+        campagne.total_retenues = total_retenues_camp
+        campagne.total_net = total_net
+        campagne.nombre_bulletins = count
+        campagne.save()
+
+        serializer = CampagnePaieSerializer(campagne)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    def _generer_avec_bulletins(self, request, campagne, personnel_ct, mois, annee):
+        """Crée la campagne à partir des montants saisis manuellement pour le personnel."""
+        bulletins_data = request.data.get('bulletins', [])
+
+        total_brut = Decimal('0')
+        total_primes_camp = Decimal('0')
+        total_retenues_camp = Decimal('0')
+        total_net = Decimal('0')
+        count = 0
+
+        for b in bulletins_data:
+            obj_id = b.get('beneficiaire_object_id')
+            if not obj_id:
+                continue
+            try:
+                beneficiaire = Personnel.objects.get(id=obj_id)
+            except Personnel.DoesNotExist:
+                continue
+
+            salaire_base = Decimal(str(b.get('salaire_base', 0) or 0))
+            primes = Decimal(str(b.get('primes', 0) or 0))
+            commissions = Decimal(str(b.get('commissions', 0) or 0))
+            retenues = Decimal(str(b.get('retenues', 0) or 0))
+
+            total_primes = primes + commissions
+            if salaire_base <= 0 and total_primes <= 0 and retenues <= 0:
+                continue
+
+            detail_primes = []
+            if primes:
+                detail_primes.append({
+                    "type": "Primes et indemnités",
+                    "libelle": "",
+                    "montant": float(primes),
+                })
+            if commissions:
+                detail_primes.append({
+                    "type": "Commission",
+                    "libelle": "",
+                    "montant": float(commissions),
+                })
+
+            detail_retenues = []
+            if retenues:
+                detail_retenues.append({
+                    "type": "Retenues",
+                    "libelle": "",
+                    "montant": float(retenues),
+                })
+
+            bulletin = BulletinPaie.objects.create(
+                campagne=campagne,
+                beneficiaire_content_type=personnel_ct,
+                beneficiaire_object_id=beneficiaire.id,
+                mois=mois,
+                annee=annee,
+                salaire_base=salaire_base,
+                total_primes=total_primes,
+                total_retenues=retenues,
+                detail_primes=detail_primes,
+                detail_retenues=detail_retenues,
+            )
+
+            total_brut += bulletin.salaire_brut
+            total_primes_camp += total_primes
+            total_retenues_camp += retenues
             total_net += bulletin.salaire_net
             count += 1
 

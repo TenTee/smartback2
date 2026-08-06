@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'etudiants',
     'personnels',
     'conges',
+    'absences',
     'inventaires',
     'demandes',
     'paiements',

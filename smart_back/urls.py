@@ -45,6 +45,7 @@ urlpatterns = [
     path('api/', include('logs.urls')),
     path("api/", include("demandes.urls")),
     path('api/conges/', include('conges.urls')),
+    path('api/absences/', include('absences.urls')),
     path('api/', include('depenses.urls')),
     path("api/", include("modules.urls")),
     path("api/", include("emploidutemps.urls")),
