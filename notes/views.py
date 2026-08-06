@@ -534,6 +534,11 @@ class NoteViewSet(viewsets.ModelViewSet):
                 Q(classe__annee_academique_id=year_id)
             )
 
+        # Restreindre aux notes de la classe actuelle de l'étudiant
+        # pour éviter que des modules d'autres classes/semestres s'affichent.
+        if inscription and inscription.classe_id:
+            notes_qs = notes_qs.filter(classe_id=inscription.classe_id)
+
         photo_doc = None
         try:
             from etudiants.models import EtudiantDocument
@@ -638,9 +643,30 @@ class NoteViewSet(viewsets.ModelViewSet):
         global_points = 0.0
         global_coeff = 0
 
+        # Déduplication par module : privilégier la note dont la session
+        # correspond au semestre du module (autorité = module.semestre).
+        def note_score(note):
+            want = note.module.semestre
+            if note.session == want:
+                return 3
+            if note.note_finale is not None:
+                return 2
+            return 1
+
+        deduped_notes = {}
+        for note in notes_qs:
+            key = note.module_id
+            if key not in deduped_notes or note_score(note) > note_score(deduped_notes[key]):
+                deduped_notes[key] = note
+
+        by_semester = {}
+        for note in deduped_notes.values():
+            label = note.module.semestre or note.session or "Semestre 1"
+            by_semester.setdefault(label, []).append(note)
+
         for session_label in ["Semestre 1", "Semestre 2"]:
-            sem_notes = notes_qs.filter(session=session_label)
-            if not sem_notes.exists():
+            sem_notes = by_semester.get(session_label, [])
+            if not sem_notes:
                 continue
             sem_data = compute_semester_data(sem_notes)
             sem_data["session"] = session_label
@@ -673,9 +699,14 @@ class NoteViewSet(viewsets.ModelViewSet):
                         Q(annee_academique_ref_id=year_id) |
                         Q(classe__annee_academique_id=year_id)
                     )
+                dd = {}
+                for n in etu_notes:
+                    key = n.module_id
+                    if key not in dd or note_score(n) > note_score(dd[key]):
+                        dd[key] = n
                 tp = 0.0
                 tc = 0
-                for n in etu_notes:
+                for n in dd.values():
                     if n.note_finale is not None:
                         c = getattr(n.module, 'coefficient', 1) or 1
                         tp += float(n.note_finale) * c
