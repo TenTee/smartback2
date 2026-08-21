@@ -5,7 +5,7 @@ class Conge(models.Model):
     date_debut = models.DateField()
     date_fin = models.DateField()
     type_conge = models.CharField(max_length=50)
-    raison = models.TextField(null=True, blank=True)
+    raison = models.TextField()
 
     statut = models.CharField(
         max_length=20,
