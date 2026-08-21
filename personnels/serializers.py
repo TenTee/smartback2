@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Personnel
 
 class PersonnelSerializer(serializers.ModelSerializer):
+    fonction = serializers.CharField(required=False)
     anciennete_annees = serializers.ReadOnlyField()
     est_eligible_conges = serializers.ReadOnlyField()
 
