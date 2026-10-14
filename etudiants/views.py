@@ -155,19 +155,90 @@ class ValiderInscriptionView(APIView):
         except Etudiant.DoesNotExist:
             return Response({"error": "Étudiant introuvable"}, status=status.HTTP_404_NOT_FOUND)
         
-        if etudiant.statut == 'Inscrit':
-            return Response({"message": "L'étudiant est déjà inscrit."}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Passer l'étudiant à Inscrit
-        etudiant.statut = 'Inscrit'
-        etudiant.save() 
+        # Inscription à valider : celle demandée, sinon celle de l'année sélectionnée,
+        # sinon la dernière pré-inscription.
+        inscription_id = request.data.get("inscription_id") if hasattr(request, "data") else None
+        inscriptions = etudiant.inscriptions.select_related("classe", "classe__filiere")
+        inscription = None
+        if inscription_id:
+            inscription = inscriptions.filter(pk=inscription_id).first()
+            if not inscription:
+                return Response({"error": "Inscription introuvable pour cet étudiant."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            year_id = get_current_academic_year_id()
+            if year_id:
+                inscription = inscriptions.filter(annee_academique_ref_id=year_id).first()
+            if not inscription:
+                inscription = inscriptions.filter(statut='Pré-inscrit').order_by('-date_inscription', '-id').first()
 
-        # Renvoyer la nouvelle data
+        if inscription:
+            if inscription.statut == 'Inscrit' and etudiant.statut == 'Inscrit':
+                return Response({"message": "L'étudiant est déjà inscrit pour cette année."}, status=status.HTTP_400_BAD_REQUEST)
+            inscription.statut = 'Inscrit'
+            inscription.save(update_fields=['statut'])
+            # La filière de l'étudiant suit la classe validée (changement d'orientation)
+            if inscription.classe and inscription.classe.filiere_id and etudiant.filiere_id != inscription.classe.filiere_id:
+                etudiant.filiere_id = inscription.classe.filiere_id
+        elif etudiant.statut == 'Inscrit':
+            return Response({"message": "L'étudiant est déjà inscrit."}, status=status.HTTP_400_BAD_REQUEST)
+
+        etudiant.statut = 'Inscrit'
+        etudiant.save()
+
         serializer = EtudiantSerializer(etudiant)
         return Response({
             "message": "Inscription validée avec succès.",
-            "etudiant": serializer.data
+            "etudiant": serializer.data,
+            "inscription": InscriptionSerializer(inscription).data if inscription else None,
         }, status=status.HTTP_200_OK)
+
+
+class ReinscriptionView(APIView):
+    """
+    Pré-inscrit un étudiant existant pour une autre année académique (en général
+    l'année suivante) dans une nouvelle classe. Le dossier (identité, matricule,
+    documents, compte) est conservé : seule une nouvelle inscription est créée.
+    """
+    def post(self, request, pk):
+        from academique.models import Classe
+
+        try:
+            etudiant = Etudiant.objects.get(pk=pk)
+        except Etudiant.DoesNotExist:
+            return Response({"error": "Étudiant introuvable"}, status=status.HTTP_404_NOT_FOUND)
+
+        classe_id = request.data.get("classe_id") or request.data.get("classe")
+        if not classe_id:
+            return Response({"error": "La classe de destination est requise."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            classe = Classe.objects.select_related("annee_academique", "niveau", "filiere").get(pk=classe_id)
+        except (Classe.DoesNotExist, ValueError, TypeError):
+            return Response({"error": "Classe introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not classe.annee_academique_id:
+            return Response({"error": "La classe choisie n'est rattachée à aucune année académique."}, status=status.HTTP_400_BAD_REQUEST)
+
+        existante = etudiant.inscriptions.filter(annee_academique_ref_id=classe.annee_academique_id).first()
+        if existante:
+            return Response({
+                "error": f"L'étudiant a déjà une inscription pour l'année {classe.annee_academique.libelle} ({existante.classe.nom if existante.classe else existante.niveau.nom}).",
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        inscription = Inscription.objects.create(
+            etudiant=etudiant,
+            classe=classe,
+            niveau=classe.niveau,
+            annee_academique=classe.annee_academique.libelle,
+            annee_academique_ref=classe.annee_academique,
+            statut='Pré-inscrit',
+        )
+
+        etudiant.refresh_from_db()
+        return Response({
+            "message": f"{etudiant.nom} est pré-inscrit(e) en {classe.nom} pour l'année {classe.annee_academique.libelle}.",
+            "inscription": InscriptionSerializer(inscription).data,
+            "etudiant": EtudiantSerializer(etudiant).data,
+        }, status=status.HTTP_201_CREATED)
 
 class MeEtudiantView(APIView):
     """

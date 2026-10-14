@@ -42,6 +42,7 @@ class InscriptionSerializer(serializers.ModelSerializer):
             'annee_academique_ref',
             'annee_academique_ref_libelle',
             'date_inscription',
+            'statut',
         ]
 
 
@@ -69,6 +70,7 @@ class EtudiantSerializer(serializers.ModelSerializer):
     documents = EtudiantDocumentSerializer(many=True, read_only=True)
     inscriptions = InscriptionSerializer(many=True, read_only=True)
     sanctions = SanctionDisciplinaireSerializer(many=True, read_only=True)
+    statut_annee = serializers.SerializerMethodField()
     username = serializers.CharField(source="user.username", read_only=True)
 
     class Meta:
@@ -94,7 +96,20 @@ class EtudiantSerializer(serializers.ModelSerializer):
             "sanctions",
             "username",
             "initial_password",
+            "statut_annee",
         ]
+
+    def get_statut_annee(self, obj):
+        """Statut de l'étudiant pour l'année académique sélectionnée (header X-Academic-Year)."""
+        from academique.middleware import get_current_academic_year_id
+        year_id = get_current_academic_year_id()
+        inscriptions = list(obj.inscriptions.all())
+        if year_id:
+            inscriptions = [ins for ins in inscriptions if ins.annee_academique_ref_id == year_id]
+        if not inscriptions:
+            return obj.statut
+        inscriptions.sort(key=lambda ins: (ins.date_inscription or 0, ins.id), reverse=True)
+        return inscriptions[0].statut or obj.statut
 
     def create(self, validated_data):
         cycle = validated_data.pop('cycle_id', None)

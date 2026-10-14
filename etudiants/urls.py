@@ -9,6 +9,7 @@ from .views import (
     InscriptionListCreateView,
     InscriptionDetailView,
     ValiderInscriptionView,
+    ReinscriptionView,
     MeEtudiantView,
     StudentPortalViewSet,
     StudentSituationView,
@@ -27,6 +28,7 @@ urlpatterns = [
     path("etudiants/<int:pk>/export-documents/", ExportEtudiantDocumentsView.as_view(), name="etudiant-export-documents"),
     path("etudiants/<int:pk>/documents/", EtudiantDocumentUploadView.as_view(), name="etudiant-upload-document"),
     path("etudiants/<int:pk>/valider-inscription/", ValiderInscriptionView.as_view(), name="etudiant-valider-inscription"),
+    path("etudiants/<int:pk>/reinscription/", ReinscriptionView.as_view(), name="etudiant-reinscription"),
     
     path("inscriptions/", InscriptionListCreateView.as_view(), name="inscription-list-create"),
     path("inscriptions/<int:pk>/", InscriptionDetailView.as_view(), name="inscription-detail"),

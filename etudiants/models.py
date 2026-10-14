@@ -76,6 +76,13 @@ class Inscription(models.Model):
         blank=True,
     )
     date_inscription = models.DateField(auto_now_add=True)
+    # Situation de l'étudiant pour CETTE année académique (un étudiant peut être
+    # inscrit cette année et déjà pré-inscrit pour l'année suivante).
+    STATUT_CHOICES = (
+        ('Pré-inscrit', 'Pré-inscrit'),
+        ('Inscrit', 'Inscrit'),
+    )
+    statut = models.CharField(max_length=20, choices=STATUT_CHOICES, default='Inscrit')
 
     class Meta:
         unique_together = ('etudiant', 'niveau', 'annee_academique')
