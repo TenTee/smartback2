@@ -73,6 +73,10 @@ class ConfigurationEtablissement(TimeStampedModel):
     nom_directeur = models.CharField(max_length=255, blank=True)
     titre_directeur = models.CharField(max_length=255, blank=True, default="Le Directeur Général")
     signature_directeur = models.ImageField(upload_to="etablissement/signatures/", null=True, blank=True)
+    cachet = models.ImageField(upload_to="etablissement/cachets/", null=True, blank=True, help_text="Cachet / tampon officiel apposé sur les documents")
+
+    # Modèle de relevé de notes (personnalisable depuis Système > Modèle de relevé)
+    releve_config = models.JSONField(default=dict, blank=True, help_text="Paramètres de mise en page du relevé de notes PDF")
 
     class Meta:
         verbose_name = "Configuration de l'Établissement"

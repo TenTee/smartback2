@@ -770,4 +770,15 @@ class NoteViewSet(viewsets.ModelViewSet):
             },
         }
 
+        response_data["etablissement"]["cachet"] = config.cachet.url if getattr(config, "cachet", None) else None
+        response_data["releve_config"] = getattr(config, "releve_config", None) or {}
+        response_data["etudiant"]["date_naissance_iso"] = etudiant.date_naissance.isoformat() if etudiant.date_naissance else None
+        response_data["etudiant"]["cycle"] = inscription.classe.cycle.nom if inscription and inscription.classe and inscription.classe.cycle_id else ""
+
+        from academique.document_assets import etablissement_images, file_to_data_url, wants_embedded_images
+        if wants_embedded_images(request):
+            images = etablissement_images(config)
+            images["photo"] = file_to_data_url(photo_doc.fichier) if photo_doc else None
+            response_data["images"] = images
+
         return Response(response_data)

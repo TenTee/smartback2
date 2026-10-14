@@ -134,9 +134,14 @@ class ConfigurationEtablissementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="current")
     def current(self, request):
+        from .document_assets import etablissement_images, wants_embedded_images
+
         config = ConfigurationEtablissement.get_config()
         serializer = self.get_serializer(config)
-        return Response(serializer.data)
+        data = dict(serializer.data)
+        if wants_embedded_images(request):
+            data["images"] = etablissement_images(config)
+        return Response(data)
 
 
 class UniversiteTutelleViewSet(OptimizedModelViewSet):
