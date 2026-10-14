@@ -44,6 +44,33 @@ class ModuleRetrieveUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
                 pass
 
     def perform_destroy(self, instance):
+        # Garde-fou : la suppression d'un cours supprimerait en cascade les notes,
+        # séances d'emploi du temps, présences, épreuves et supports de cours liés.
+        usages = []
+        checks = [
+            ("notes", "note(s)"),
+            ("emploidutemps_set", "séance(s) d'emploi du temps"),
+            ("assiduite", "relevé(s) d'assiduité"),
+            ("epreuves", "épreuve(s)"),
+            ("cours_documents", "support(s) de cours"),
+            ("evaluations_academique", "évaluation(s)"),
+            ("affectations_academique", "affectation(s) de formateur"),
+        ]
+        for related, label in checks:
+            manager = getattr(instance, related, None)
+            if manager is None:
+                continue
+            try:
+                count = manager.count()
+            except Exception:
+                continue
+            if count:
+                usages.append(f"{count} {label}")
+        if usages:
+            raise ValidationError(
+                "Impossible de supprimer ce cours : il est utilisé par " + ", ".join(usages)
+                + ". Retirez-le plutôt des classes concernées."
+            )
         try:
             instance.delete()
         except ProtectedError:
