@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
-from .models import EmploiDuTemps, Salle, periode_q, semaine_de
+from .models import EmploiDuTemps, Salle, SeanceRealisee, periode_q, semaine_de
 from .serializers import EmploiDuTempsSerializer, SalleSerializer
 
 class SalleViewSet(viewsets.ModelViewSet):
@@ -90,6 +90,159 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
                 except DjangoValidationError as e:
                     erreurs.append(f"{ed.jour} {ed.heure_debut:%H:%M}-{ed.heure_fin:%H:%M} {ed.module.nom} : {' '.join(e.messages)}")
         return Response({"crees": crees, "erreurs": erreurs}, status=201 if crees else 400)
+
+    # ------------------------------------------------------------------
+    # Validation des séances (heures comptabilisées seulement après validation)
+    # ------------------------------------------------------------------
+    @action(detail=False, methods=["get"], url_path="seances")
+    def seances(self, request):
+        """Séances datées d'une période avec leur état de validation.
+
+        ?date_debut&date_fin (défaut : semaine en cours), ?classe, ?formateur, ?module,
+        ?statut=a_valider|effectuee|non_effectuee|a_venir
+        """
+        import datetime as dt
+        from academique.middleware import get_current_academic_year_id
+        from .seances import annee_academique, duree_prevue, est_passee, maintenant, occurrences
+
+        params = request.query_params
+        now = maintenant()
+        annee = annee_academique(get_current_academic_year_id())
+        debut = self._parse_date(params.get("date_debut"))
+        fin = self._parse_date(params.get("date_fin"))
+        if not debut and not fin:
+            debut, fin = semaine_de(now.date())
+        debut = debut or fin - dt.timedelta(days=6)
+        fin = fin or debut + dt.timedelta(days=6)
+        if (fin - debut).days > 370:
+            return Response({"detail": "Période trop longue (1 an maximum)."}, status=400)
+
+        qs = EmploiDuTemps.objects.select_related("module", "classe", "formateur", "salle").filter(periode_q(debut, fin))
+        srs = SeanceRealisee.objects.select_related("module", "classe", "formateur", "valide_par").filter(date__gte=debut, date__lte=fin)
+        if annee:
+            qs = qs.filter(classe__annee_academique=annee)
+            srs = srs.filter(classe__annee_academique=annee)
+        for key in ("classe", "formateur", "module"):
+            if params.get(key):
+                qs = qs.filter(**{f"{key}_id": params.get(key)})
+                srs = srs.filter(**{f"{key}_id": params.get(key)})
+        records = {(r.emploi_id, r.date): r for r in srs if r.emploi_id}
+
+        def row_from_record(r, e=None):
+            return {
+                "valide_par": f"{r.valide_par.noms} {r.valide_par.prenoms}".strip() if r.valide_par else "",
+                "valide_le": r.valide_le,
+                "statut": r.statut,
+                "duree_validee": r.duree_minutes,
+                "commentaire": r.commentaire,
+                "seance_id": r.id,
+            }
+
+        rows = []
+        for e in qs:
+            if not e.classe_id:
+                continue
+            for d in occurrences(e, annee, debut, fin):
+                passee = est_passee(d, e.heure_fin, now)
+                row = {
+                    "key": f"{e.id}_{d.isoformat()}",
+                    "emploi_id": e.id, "date": d, "jour": e.jour,
+                    "heure_debut": e.heure_debut, "heure_fin": e.heure_fin, "duree_prevue": duree_prevue(e),
+                    "classe_id": e.classe_id, "classe_nom": e.classe.nom if e.classe else "",
+                    "module_id": e.module_id, "module_nom": e.module.nom,
+                    "formateur_id": e.formateur_id, "formateur_nom": e.formateur.nom,
+                    "salle_nom": e.salle.nom if e.salle_id else "",
+                    "passee": passee, "permanent": not e.date_debut,
+                    "statut": "a_valider" if passee else "a_venir",
+                    "duree_validee": None, "commentaire": "", "valide_par": "", "valide_le": None, "seance_id": None,
+                }
+                r = records.pop((e.id, d), None)
+                if r:
+                    row.update(row_from_record(r))
+                rows.append(row)
+        # Séances validées dont le créneau a été supprimé ou déplacé : gardées dans l'historique
+        for r in [r for r in srs if not r.emploi_id] + list(records.values()):
+            rows.append({
+                "key": f"s{r.id}", "emploi_id": r.emploi_id, "date": r.date,
+                "jour": ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"][r.date.weekday()],
+                "heure_debut": r.heure_debut, "heure_fin": r.heure_fin,
+                "duree_prevue": max(0, (r.heure_fin.hour * 60 + r.heure_fin.minute) - (r.heure_debut.hour * 60 + r.heure_debut.minute)),
+                "classe_id": r.classe_id, "classe_nom": r.classe.nom if r.classe else "",
+                "module_id": r.module_id, "module_nom": r.module.nom,
+                "formateur_id": r.formateur_id, "formateur_nom": r.formateur.nom, "salle_nom": "",
+                "passee": True, "permanent": False, "hors_programmation": True, **row_from_record(r),
+            })
+        statut = params.get("statut")
+        if statut:
+            rows = [x for x in rows if x["statut"] == statut]
+        rows.sort(key=lambda x: (x["date"], x["heure_debut"], x["classe_nom"]))
+        resume = {k: sum(1 for x in rows if x["statut"] == k) for k in ("a_valider", "effectuee", "non_effectuee", "a_venir")}
+        resume["minutes_validees"] = sum(x["duree_validee"] or 0 for x in rows if x["statut"] == "effectuee")
+        resume["minutes_a_valider"] = sum(x["duree_prevue"] for x in rows if x["statut"] == "a_valider")
+        return Response({"date_debut": debut, "date_fin": fin, "resume": resume, "seances": rows})
+
+    @action(detail=False, methods=["post"], url_path="seances/valider")
+    def valider_seances(self, request):
+        """Valide (ou annule la validation) d'une ou plusieurs séances.
+
+        Body : {"seances": [{"emploi_id", "date", "statut": "effectuee"|"non_effectuee"|"annuler",
+                             "duree_minutes"?, "commentaire"?}]}
+        """
+        from django.utils.dateparse import parse_date
+        from academique.middleware import get_current_academic_year_id
+        from .seances import annee_academique, date_valide_pour, duree_prevue, est_passee, maintenant
+
+        items = request.data.get("seances") or []
+        if not isinstance(items, list) or not items:
+            return Response({"detail": "Aucune séance à valider."}, status=400)
+        now = maintenant()
+        annee = annee_academique(get_current_academic_year_id())
+        ok, erreurs = 0, []
+        for it in items:
+            try:
+                e = EmploiDuTemps.objects.select_related("classe").get(pk=it.get("emploi_id"))
+            except (EmploiDuTemps.DoesNotExist, ValueError, TypeError):
+                erreurs.append(f"Créneau {it.get('emploi_id')} introuvable.")
+                continue
+            d = parse_date(str(it.get("date") or ""))
+            label = f"{e.module} — {e.classe} du {d.strftime('%d-%m-%Y') if d else '?'}"
+            statut = it.get("statut")
+            if not d or not date_valide_pour(e, d, annee or (e.classe.annee_academique if e.classe else None)):
+                erreurs.append(f"{label} : cette date ne correspond pas au créneau.")
+                continue
+            if statut == "annuler":
+                SeanceRealisee.objects.filter(emploi=e, date=d).delete()
+                ok += 1
+                continue
+            if statut not in (SeanceRealisee.EFFECTUEE, SeanceRealisee.NON_EFFECTUEE):
+                erreurs.append(f"{label} : statut invalide.")
+                continue
+            if not est_passee(d, e.heure_fin, now):
+                erreurs.append(f"{label} : la séance n'est pas encore terminée.")
+                continue
+            prevue = duree_prevue(e)
+            duree = prevue
+            if statut == SeanceRealisee.EFFECTUEE and it.get("duree_minutes") not in (None, ""):
+                try:
+                    duree = int(it.get("duree_minutes"))
+                except (TypeError, ValueError):
+                    erreurs.append(f"{label} : durée invalide.")
+                    continue
+                if duree <= 0 or duree > 24 * 60:
+                    erreurs.append(f"{label} : durée invalide.")
+                    continue
+            SeanceRealisee.objects.update_or_create(
+                emploi=e, date=d,
+                defaults={
+                    "statut": statut, "formateur_id": e.formateur_id, "module_id": e.module_id, "classe_id": e.classe_id,
+                    "heure_debut": e.heure_debut, "heure_fin": e.heure_fin,
+                    "duree_minutes": duree if statut == SeanceRealisee.EFFECTUEE else 0,
+                    "commentaire": str(it.get("commentaire") or "")[:2000],
+                    "valide_par": request.user if request.user.is_authenticated else None,
+                },
+            )
+            ok += 1
+        return Response({"traitees": ok, "erreurs": erreurs}, status=200 if ok else 400)
 
     @action(detail=False, methods=["get"], url_path="me")
     def me(self, request):

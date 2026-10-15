@@ -159,3 +159,36 @@ class EmploiDuTemps(models.Model):
 
     def __str__(self):
         return f"{self.filiere} | {self.jour} {self.heure_debut}-{self.heure_fin} | {self.module} ({self.formateur})"
+
+
+class SeanceRealisee(models.Model):
+    """Validation d'une séance (occurrence datée d'un créneau d'emploi du temps).
+
+    Seules les séances validées « effectuée » sont comptées comme heures dispensées.
+    Les informations du créneau sont recopiées pour garder l'historique si le créneau
+    est ensuite modifié ou supprimé.
+    """
+
+    EFFECTUEE = "effectuee"
+    NON_EFFECTUEE = "non_effectuee"
+    STATUTS = [(EFFECTUEE, "Effectuée"), (NON_EFFECTUEE, "Non effectuée")]
+
+    emploi = models.ForeignKey(EmploiDuTemps, on_delete=models.SET_NULL, null=True, blank=True, related_name="seances")
+    date = models.DateField()
+    statut = models.CharField(max_length=20, choices=STATUTS)
+    formateur = models.ForeignKey(Formateur, on_delete=models.CASCADE, related_name="seances_realisees")
+    module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="seances_realisees")
+    classe = models.ForeignKey("academique.Classe", on_delete=models.SET_NULL, null=True, blank=True, related_name="seances_realisees")
+    heure_debut = models.TimeField()
+    heure_fin = models.TimeField()
+    duree_minutes = models.PositiveIntegerField(default=0, help_text="Durée réellement effectuée (minutes)")
+    commentaire = models.TextField(blank=True, default="")
+    valide_par = models.ForeignKey("users.CustomUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="seances_validees")
+    valide_le = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date", "heure_debut"]
+        constraints = [models.UniqueConstraint(fields=["emploi", "date"], name="unique_seance_par_creneau_et_date")]
+
+    def __str__(self):
+        return f"{self.date} {self.module} ({self.get_statut_display()})"
