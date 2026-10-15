@@ -64,3 +64,72 @@ def est_passee(d, heure_fin, now):
 
 def date_valide_pour(entry, d, annee):
     return d in occurrences(entry, annee, d, d)
+
+
+JOURS_NOMS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+
+
+def _hm(t):
+    return t.hour * 60 + t.minute
+
+
+def lister_seances(creneaux, validations, debut, fin, annee, now, statut=None):
+    """Séances datées entre `debut` et `fin` avec leur état de validation.
+
+    creneaux     : queryset d'EmploiDuTemps (déjà filtré)
+    validations  : queryset de SeanceRealisee (déjà filtré)
+    """
+    creneaux = creneaux.select_related("module", "classe", "formateur", "salle")
+    srs = list(validations.select_related("module", "classe", "formateur", "valide_par").filter(date__gte=debut, date__lte=fin))
+    records = {(r.emploi_id, r.date): r for r in srs if r.emploi_id}
+
+    def depuis_validation(r):
+        return {
+            "valide_par": f"{r.valide_par.noms} {r.valide_par.prenoms}".strip() if r.valide_par else "",
+            "valide_le": r.valide_le,
+            "statut": r.statut,
+            "duree_validee": r.duree_minutes,
+            "commentaire": r.commentaire,
+            "seance_id": r.id,
+        }
+
+    rows = []
+    for e in creneaux:
+        if not e.classe_id:
+            continue
+        for d in occurrences(e, annee, debut, fin):
+            passee = est_passee(d, e.heure_fin, now)
+            row = {
+                "key": f"{e.id}_{d.isoformat()}",
+                "emploi_id": e.id, "date": d, "jour": e.jour,
+                "heure_debut": e.heure_debut, "heure_fin": e.heure_fin, "duree_prevue": duree_prevue(e),
+                "classe_id": e.classe_id, "classe_nom": e.classe.nom if e.classe else "",
+                "module_id": e.module_id, "module_nom": e.module.nom,
+                "formateur_id": e.formateur_id, "formateur_nom": e.formateur.nom,
+                "salle_nom": e.salle.nom if e.salle_id else "",
+                "passee": passee, "permanent": not e.date_debut,
+                "statut": "a_valider" if passee else "a_venir",
+                "duree_validee": None, "commentaire": "", "valide_par": "", "valide_le": None, "seance_id": None,
+            }
+            r = records.pop((e.id, d), None)
+            if r:
+                row.update(depuis_validation(r))
+            rows.append(row)
+    # Validations dont le créneau a été supprimé ou modifié : conservées dans l'historique
+    for r in [r for r in srs if not r.emploi_id] + list(records.values()):
+        rows.append({
+            "key": f"s{r.id}", "emploi_id": r.emploi_id, "date": r.date, "jour": JOURS_NOMS[r.date.weekday()],
+            "heure_debut": r.heure_debut, "heure_fin": r.heure_fin,
+            "duree_prevue": max(0, _hm(r.heure_fin) - _hm(r.heure_debut)),
+            "classe_id": r.classe_id, "classe_nom": r.classe.nom if r.classe else "",
+            "module_id": r.module_id, "module_nom": r.module.nom,
+            "formateur_id": r.formateur_id, "formateur_nom": r.formateur.nom, "salle_nom": "",
+            "passee": True, "permanent": False, "hors_programmation": True, **depuis_validation(r),
+        })
+    if statut:
+        rows = [x for x in rows if x["statut"] == statut]
+    rows.sort(key=lambda x: (x["date"], x["heure_debut"], x["classe_nom"]))
+    resume = {k: sum(1 for x in rows if x["statut"] == k) for k in ("a_valider", "effectuee", "non_effectuee", "a_venir")}
+    resume["minutes_validees"] = sum(x["duree_validee"] or 0 for x in rows if x["statut"] == "effectuee")
+    resume["minutes_a_valider"] = sum(x["duree_prevue"] for x in rows if x["statut"] == "a_valider")
+    return {"date_debut": debut, "date_fin": fin, "resume": resume, "seances": rows}

@@ -471,6 +471,36 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             'total_notes_saisies': total_notes_saisies,
         })
 
+    @action(detail=False, methods=['get'], url_path='mes-seances')
+    def mes_seances(self, request):
+        """Séances du formateur connecté sur une période (?date_debut&date_fin, défaut : semaine en cours)
+        avec leur état de validation par l'administration (lecture seule)."""
+        formateur = self._get_formateur(request)
+        if not formateur:
+            return Response({"detail": "Profil formateur introuvable."}, status=404)
+        import datetime as dt
+        from django.utils.dateparse import parse_date
+        from academique.middleware import get_current_academic_year_id
+        from emploidutemps.models import EmploiDuTemps, SeanceRealisee, periode_q, semaine_de
+        from emploidutemps.seances import annee_academique, lister_seances, maintenant
+
+        now = maintenant()
+        annee = annee_academique(get_current_academic_year_id())
+        debut = parse_date(request.query_params.get("date_debut") or "")
+        fin = parse_date(request.query_params.get("date_fin") or "")
+        if not debut and not fin:
+            debut, fin = semaine_de(now.date())
+        debut = debut or fin - dt.timedelta(days=6)
+        fin = fin or debut + dt.timedelta(days=6)
+        if (fin - debut).days > 370:
+            return Response({"detail": "Période trop longue (1 an maximum)."}, status=400)
+        qs = EmploiDuTemps.objects.filter(formateur=formateur).filter(periode_q(debut, fin))
+        srs = SeanceRealisee.objects.filter(formateur=formateur)
+        if annee:
+            qs = qs.filter(classe__annee_academique=annee)
+            srs = srs.filter(classe__annee_academique=annee)
+        return Response(lister_seances(qs, srs, debut, fin, annee, now, request.query_params.get("statut")))
+
     @action(detail=False, methods=['get'], url_path='ma-fiche-suivi')
     def ma_fiche_suivi(self, request):
         formateur = self._get_formateur(request)

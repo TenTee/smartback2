@@ -514,6 +514,11 @@ class NoteViewSet(viewsets.ModelViewSet):
         except Etudiant.DoesNotExist:
             return Response({"error": "Étudiant introuvable"}, status=404)
 
+        # Un étudiant connecté ne peut consulter que son propre relevé
+        own = getattr(request.user, "etudiant_profile", None)
+        if own is not None and not request.user.is_staff and own.pk != etudiant.pk:
+            return Response({"error": "Accès refusé."}, status=403)
+
         inscription = Inscription.objects.filter(
             etudiant=etudiant,
             classe__isnull=False,

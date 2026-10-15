@@ -103,7 +103,7 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
         """
         import datetime as dt
         from academique.middleware import get_current_academic_year_id
-        from .seances import annee_academique, duree_prevue, est_passee, maintenant, occurrences
+        from .seances import annee_academique, lister_seances, maintenant
 
         params = request.query_params
         now = maintenant()
@@ -117,8 +117,8 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
         if (fin - debut).days > 370:
             return Response({"detail": "Période trop longue (1 an maximum)."}, status=400)
 
-        qs = EmploiDuTemps.objects.select_related("module", "classe", "formateur", "salle").filter(periode_q(debut, fin))
-        srs = SeanceRealisee.objects.select_related("module", "classe", "formateur", "valide_par").filter(date__gte=debut, date__lte=fin)
+        qs = EmploiDuTemps.objects.filter(periode_q(debut, fin))
+        srs = SeanceRealisee.objects.all()
         if annee:
             qs = qs.filter(classe__annee_academique=annee)
             srs = srs.filter(classe__annee_academique=annee)
@@ -126,60 +126,7 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
             if params.get(key):
                 qs = qs.filter(**{f"{key}_id": params.get(key)})
                 srs = srs.filter(**{f"{key}_id": params.get(key)})
-        records = {(r.emploi_id, r.date): r for r in srs if r.emploi_id}
-
-        def row_from_record(r, e=None):
-            return {
-                "valide_par": f"{r.valide_par.noms} {r.valide_par.prenoms}".strip() if r.valide_par else "",
-                "valide_le": r.valide_le,
-                "statut": r.statut,
-                "duree_validee": r.duree_minutes,
-                "commentaire": r.commentaire,
-                "seance_id": r.id,
-            }
-
-        rows = []
-        for e in qs:
-            if not e.classe_id:
-                continue
-            for d in occurrences(e, annee, debut, fin):
-                passee = est_passee(d, e.heure_fin, now)
-                row = {
-                    "key": f"{e.id}_{d.isoformat()}",
-                    "emploi_id": e.id, "date": d, "jour": e.jour,
-                    "heure_debut": e.heure_debut, "heure_fin": e.heure_fin, "duree_prevue": duree_prevue(e),
-                    "classe_id": e.classe_id, "classe_nom": e.classe.nom if e.classe else "",
-                    "module_id": e.module_id, "module_nom": e.module.nom,
-                    "formateur_id": e.formateur_id, "formateur_nom": e.formateur.nom,
-                    "salle_nom": e.salle.nom if e.salle_id else "",
-                    "passee": passee, "permanent": not e.date_debut,
-                    "statut": "a_valider" if passee else "a_venir",
-                    "duree_validee": None, "commentaire": "", "valide_par": "", "valide_le": None, "seance_id": None,
-                }
-                r = records.pop((e.id, d), None)
-                if r:
-                    row.update(row_from_record(r))
-                rows.append(row)
-        # Séances validées dont le créneau a été supprimé ou déplacé : gardées dans l'historique
-        for r in [r for r in srs if not r.emploi_id] + list(records.values()):
-            rows.append({
-                "key": f"s{r.id}", "emploi_id": r.emploi_id, "date": r.date,
-                "jour": ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"][r.date.weekday()],
-                "heure_debut": r.heure_debut, "heure_fin": r.heure_fin,
-                "duree_prevue": max(0, (r.heure_fin.hour * 60 + r.heure_fin.minute) - (r.heure_debut.hour * 60 + r.heure_debut.minute)),
-                "classe_id": r.classe_id, "classe_nom": r.classe.nom if r.classe else "",
-                "module_id": r.module_id, "module_nom": r.module.nom,
-                "formateur_id": r.formateur_id, "formateur_nom": r.formateur.nom, "salle_nom": "",
-                "passee": True, "permanent": False, "hors_programmation": True, **row_from_record(r),
-            })
-        statut = params.get("statut")
-        if statut:
-            rows = [x for x in rows if x["statut"] == statut]
-        rows.sort(key=lambda x: (x["date"], x["heure_debut"], x["classe_nom"]))
-        resume = {k: sum(1 for x in rows if x["statut"] == k) for k in ("a_valider", "effectuee", "non_effectuee", "a_venir")}
-        resume["minutes_validees"] = sum(x["duree_validee"] or 0 for x in rows if x["statut"] == "effectuee")
-        resume["minutes_a_valider"] = sum(x["duree_prevue"] for x in rows if x["statut"] == "a_valider")
-        return Response({"date_debut": debut, "date_fin": fin, "resume": resume, "seances": rows})
+        return Response(lister_seances(qs, srs, debut, fin, annee, now, params.get("statut")))
 
     @action(detail=False, methods=["post"], url_path="seances/valider")
     def valider_seances(self, request):
@@ -252,8 +199,15 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
             return Response({"error": "Profil étudiant introuvable"}, status=404)
         
         # On récupère les emplois du temps liés à la classe de l'étudiant
-        classe_ids = etudiant.inscriptions.values_list('classe_id', flat=True)
-        niveau_ids = etudiant.inscriptions.values_list('niveau_id', flat=True)
+        from academique.middleware import get_current_academic_year_id
+        inscriptions = etudiant.inscriptions.all()
+        year_id = get_current_academic_year_id()
+        if year_id:
+            de_l_annee = inscriptions.filter(models.Q(annee_academique_ref_id=year_id) | models.Q(classe__annee_academique_id=year_id))
+            if de_l_annee.exists():
+                inscriptions = de_l_annee
+        classe_ids = inscriptions.values_list('classe_id', flat=True)
+        niveau_ids = inscriptions.values_list('niveau_id', flat=True)
         
         queryset = EmploiDuTemps.objects.filter(
             models.Q(classe_id__in=classe_ids) | 
