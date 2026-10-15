@@ -286,12 +286,26 @@ class Classe(NamedDescriptionModel):
     def __str__(self):
         return self.nom
 
+    def siblings(self):
+        """Classes du même parcours (filière, cycle, niveau) sur les autres années académiques."""
+        return Classe.objects.filter(
+            filiere_id=self.filiere_id, cycle_id=self.cycle_id, niveau_id=self.niveau_id
+        ).exclude(pk=self.pk)
+
     def save(self, *args, **kwargs):
         if not self.nom:
             self.nom = f"{self.filiere.nom} - {self.niveau.nom} ({self.annee_academique.libelle})"
         super().save(*args, **kwargs)
 
         if not self.modules.exists():
+            # Les cours d'une classe sont communs à toutes les années académiques :
+            # une nouvelle classe reprend ceux des classes de même filière / cycle / niveau.
+            sibling_modules = set(
+                Classe.modules.through.objects.filter(classe__in=self.siblings()).values_list("module_id", flat=True)
+            )
+            if sibling_modules:
+                self.modules.set(Module.objects.filter(id__in=sibling_modules))
+                return
             base_modules = CourseAssignment.objects.filter(
                 filiere=self.filiere,
                 cycle=self.cycle,
