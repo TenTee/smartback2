@@ -23,7 +23,8 @@ load_dotenv(BASE_DIR / '.env')
 # Sécurité
 # -------------------------
 SECRET_KEY = 'django-insecure-%)nyb*o-kkh67_e)5!jvgbcu&m#49j!c=s9&@!1636^x*9%nmo'
-DEBUG = True
+# Désactiver en production via la variable d'environnement DJANGO_DEBUG=False
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('1', 'true', 'yes')
 ALLOWED_HOSTS = [
     '*']
 
