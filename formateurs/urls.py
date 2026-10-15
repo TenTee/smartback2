@@ -8,6 +8,8 @@ from .views import (
     FormateurPortalViewSet,
     CoursDocumentViewSet,
     CoursDocumentEtudiantView,
+    FormateurSuiviView,
+    FormateursSuiviListView,
 )
 
 router = DefaultRouter()
@@ -16,6 +18,8 @@ router.register(r'cours-documents', CoursDocumentViewSet, basename='cours-docume
 
 urlpatterns = [
     path('', FormateurListCreateView.as_view(), name='formateur-list'),
+    path('suivi/', FormateursSuiviListView.as_view(), name='formateurs-suivi'),
+    path('<int:pk>/suivi/', FormateurSuiviView.as_view(), name='formateur-suivi'),
     path('<int:pk>/', FormateurRetrieveUpdateDeleteView.as_view(), name='formateur-detail'),
     path('<int:pk>/generate-account/', FormateurGenerateAccountView.as_view(), name='formateur-generate-account'),
     path('', include(router.urls)),

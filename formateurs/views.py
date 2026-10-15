@@ -471,6 +471,16 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             'total_notes_saisies': total_notes_saisies,
         })
 
+    @action(detail=False, methods=['get'], url_path='ma-fiche-suivi')
+    def ma_fiche_suivi(self, request):
+        formateur = self._get_formateur(request)
+        if not formateur:
+            return Response({"detail": "Profil formateur introuvable."}, status=404)
+        from academique.middleware import get_current_academic_year_id
+        from .suivi import compute_suivi
+
+        return Response(compute_suivi(formateur, get_current_academic_year_id()))
+
     @action(detail=False, methods=['get'], url_path='mes-epreuves')
     def mes_epreuves(self, request):
         formateur = self._get_formateur(request)
@@ -600,3 +610,34 @@ class CoursDocumentEtudiantView(generics.ListAPIView):
 
     def get_queryset(self):
         return CoursDocument.objects.filter(est_visible_etudiants=True)
+
+
+# ---------------------------------------------------------------------------
+# Fiche de suivi des heures (calculée depuis les emplois du temps)
+# ---------------------------------------------------------------------------
+class FormateurSuiviView(generics.GenericAPIView):
+    """GET /api/formateurs/<pk>/suivi/ : fiche de suivi détaillée d'un formateur."""
+    queryset = Formateur.objects.all()
+
+    def get(self, request, pk):
+        from academique.middleware import get_current_academic_year_id
+        from .suivi import compute_suivi
+
+        formateur = self.get_object()
+        return Response(compute_suivi(formateur, get_current_academic_year_id()))
+
+
+class FormateursSuiviListView(generics.GenericAPIView):
+    """GET /api/formateurs/suivi/ : synthèse de tous les formateurs (totaux uniquement)."""
+    queryset = Formateur.objects.all()
+
+    def get(self, request):
+        from academique.middleware import get_current_academic_year_id
+        from .suivi import compute_suivi
+
+        annee_id = get_current_academic_year_id()
+        data = []
+        for f in Formateur.objects.prefetch_related("specialites").order_by("nom"):
+            fiche = compute_suivi(f, annee_id)
+            data.append({**fiche["formateur"], "totaux": fiche["totaux"], "annee": fiche["annee"]})
+        return Response(data)
