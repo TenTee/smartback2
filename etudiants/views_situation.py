@@ -50,7 +50,7 @@ class StudentSituationView(APIView):
                 })
             
             # 3. Résumé financier (via application paiements)
-            from paiements.models import Paiement, Frais
+            from paiements.models import Paiement, Frais, paiements_de_l_annee
             montant_du = Decimal("0")
             montant_paye = Decimal("0")
             
@@ -59,7 +59,7 @@ class StudentSituationView(APIView):
                 frais_classe = Frais.objects.filter(classe=inscription.classe)
                 montant_du = frais_classe.aggregate(total=Coalesce(Sum("montant"), Decimal("0"), output_field=DecimalField()))["total"]
                 
-                paiements_qs = Paiement.objects.filter(etudiant=etudiant, frais__classe=inscription.classe)
+                paiements_qs = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), inscription.annee_academique_ref_id or inscription.classe.annee_academique_id)
                 montant_paye = paiements_qs.aggregate(total=Coalesce(Sum("montant_paye"), Decimal("0"), output_field=DecimalField()))["total"]
             
             # 4. Résumé assiduité (via application assiduite)
@@ -101,7 +101,7 @@ class StudentHistoryView(APIView):
     """
     def get(self, request):
         from notes.models import Note
-        from paiements.models import Paiement, Frais
+        from paiements.models import Paiement, Frais, paiements_de_l_annee
         from assiduite.models import AssiduiteRecord
         from django.db.models import Sum, DecimalField
         from django.db.models.functions import Coalesce
@@ -136,7 +136,7 @@ class StudentHistoryView(APIView):
                     frais_classe = Frais.objects.filter(classe=ins.classe)
                     montant_du = frais_classe.aggregate(total=Coalesce(Sum("montant"), Decimal("0"), output_field=DecimalField()))["total"]
                     
-                    paiements_qs = Paiement.objects.filter(etudiant=etudiant, frais__classe=ins.classe)
+                    paiements_qs = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), ins.annee_academique_ref_id or ins.classe.annee_academique_id)
                     montant_paye = paiements_qs.aggregate(total=Coalesce(Sum("montant_paye"), Decimal("0"), output_field=DecimalField()))["total"]
                 
                 # 3. Assiduité

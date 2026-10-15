@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from etudiants.models import Etudiant
 from academique.middleware import get_current_academic_year_id
 
+from .models import paiements_de_l_annee
 from .models import (
     ClassePaymentInstallment,
     ClassePaymentSchedule,
@@ -38,10 +39,7 @@ class PaiementListCreate(generics.ListCreateAPIView):
         queryset = Paiement.objects.select_related("etudiant", "filiere", "frais", "frais__classe").all()
 
         year_id = get_current_academic_year_id()
-        if year_id:
-            queryset = queryset.filter(
-                models.Q(frais__classe__annee_academique_id=year_id) | models.Q(frais__isnull=True)
-            )
+        queryset = paiements_de_l_annee(queryset, year_id)
 
         etudiant_id = self.request.query_params.get("etudiant")
         frais_id = self.request.query_params.get("frais")
@@ -88,11 +86,7 @@ class PaiementAggregated(APIView):
                 montant_du_formation = frais_formation.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
 
             # Calculer les paiements effectués (inclure ceux avec et sans frais)
-            paiements = Paiement.objects.filter(etudiant=etudiant)
-            if year_id:
-                paiements = paiements.filter(
-                    models.Q(frais__classe__annee_academique_id=year_id) | models.Q(frais__isnull=True)
-                )
+            paiements = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), year_id)
             paiements_inscription = paiements.filter(paiement_type="INSCRIPTION")
             paiements_formation = paiements.filter(paiement_type="FORMATION")
 
@@ -269,11 +263,7 @@ class FinancialDashboardView(APIView):
                 ).aggregate(t=Sum("montant"))["t"] or Decimal("0")
 
         # Montants recouvrés
-        paiements_qs = Paiement.objects.all()
-        if year_id:
-            paiements_qs = paiements_qs.filter(
-                models.Q(frais__classe__annee_academique_id=year_id) | models.Q(frais__isnull=True)
-            )
+        paiements_qs = paiements_de_l_annee(Paiement.objects.all(), year_id)
 
         total_recouvre_inscription = paiements_qs.filter(
             paiement_type="INSCRIPTION"
@@ -299,7 +289,7 @@ class FinancialDashboardView(APIView):
             if classe:
                 total_du = Frais.objects.filter(classe=classe).aggregate(t=Sum("montant"))["t"] or Decimal("0")
 
-            total_paye = Paiement.objects.filter(etudiant=etudiant).aggregate(
+            total_paye = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), year_id).aggregate(
                 t=Sum("montant_paye"))["t"] or Decimal("0")
 
             if total_du > 0:
@@ -364,9 +354,9 @@ class FinancialDashboardView(APIView):
             nb_etudiants = etudiants_filiere.count()
             if nb_etudiants == 0:
                 continue
-            total_paye_filiere = Paiement.objects.filter(
+            total_paye_filiere = paiements_de_l_annee(Paiement.objects.filter(
                 etudiant__in=etudiants_filiere
-            ).aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+            ), year_id).aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
             repartition_filieres.append({
                 "filiere": filiere.nom,
                 "nb_etudiants": nb_etudiants,
@@ -433,7 +423,8 @@ class MePaiementSummary(APIView):
                 total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
             )["total"]
         
-        paiements = Paiement.objects.filter(etudiant=etudiant)
+        annee_id = derniere_inscription.annee_academique_ref_id if derniere_inscription else year_id
+        paiements = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), annee_id)
         montant_paye_inscription = paiements.filter(paiement_type="INSCRIPTION").aggregate(
             total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
         )["total"]
@@ -441,7 +432,9 @@ class MePaiementSummary(APIView):
             total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
         )["total"]
 
-        plan = StudentPaymentPlan.objects.filter(etudiant=etudiant).first()
+        plans = StudentPaymentPlan.objects.filter(etudiant=etudiant)
+        plan = (plans.filter(classe__annee_academique_id=annee_id).first() if annee_id else None) \
+            or plans.filter(classe__isnull=True).first()
         installments = []
         if plan:
             for inst in plan.installments.all():
@@ -589,9 +582,9 @@ class StudentScheduleOverrideView(APIView):
 
         # Distribute existing payments to the new plan
         from .models import Paiement
-        total_paid = Paiement.objects.filter(
+        total_paid = paiements_de_l_annee(Paiement.objects.filter(
             etudiant=etudiant, paiement_type="FORMATION"
-        ).aggregate(total=Sum("montant_paye"))["total"] or Decimal("0")
+        ), classe.annee_academique_id).aggregate(total=Sum("montant_paye"))["total"] or Decimal("0")
 
         remaining = total_paid
         for inst in plan.installments.all().order_by("due_date", "order"):

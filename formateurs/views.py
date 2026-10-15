@@ -150,9 +150,11 @@ class FormateurPortalViewSet(viewsets.ViewSet):
         module_ids = set(m.id for _, m in pairs)
         classe_ids = set(c.id for c, _ in pairs)
 
+        from emploidutemps.models import periode_q, semaine_de
         edt_qs = EmploiDuTemps.objects.filter(formateur=formateur)
         if annee_id:
             edt_qs = edt_qs.filter(classe__annee_academique_id=annee_id)
+        edt_qs = edt_qs.filter(periode_q(*semaine_de(datetime.date.today())))
         total_seances = edt_qs.count()
 
         total_notes = Note.objects.filter(
@@ -318,10 +320,17 @@ class FormateurPortalViewSet(viewsets.ViewSet):
         from emploidutemps.serializers import EmploiDuTempsSerializer
         from academique.middleware import get_current_academic_year_id
 
+        from emploidutemps.models import periode_q, semaine_de
+        from django.utils import timezone
+        from django.utils.dateparse import parse_date
+
         annee_id = get_current_academic_year_id()
         schedules = EmploiDuTemps.objects.filter(formateur=formateur)
         if annee_id:
             schedules = schedules.filter(classe__annee_academique_id=annee_id)
+        # Semaine en cours par défaut (ou ?date=YYYY-MM-DD), + créneaux permanents
+        jour = parse_date(request.query_params.get("date") or "") or timezone.localdate()
+        schedules = schedules.filter(periode_q(*semaine_de(jour)))
         serializer = EmploiDuTempsSerializer(schedules, many=True)
         return Response(serializer.data)
 

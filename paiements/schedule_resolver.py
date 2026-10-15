@@ -103,10 +103,11 @@ def compute_student_retard(etudiant, classe, reference_date=None):
         }
 
     # source == "global"
-    total_paid = Paiement.objects.filter(
+    from .models import paiements_de_l_annee
+    total_paid = paiements_de_l_annee(Paiement.objects.filter(
         etudiant=etudiant,
         paiement_type="FORMATION",
-    ).aggregate(total=Sum("montant_paye"))["total"] or Decimal("0")
+    ), classe.annee_academique_id).aggregate(total=Sum("montant_paye"))["total"] or Decimal("0")
 
     remaining_payment = total_paid
     result_installments = []

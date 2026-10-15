@@ -158,6 +158,7 @@ class PaiementSerializer(serializers.ModelSerializer):
     filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
     frais_libelle = serializers.CharField(source="frais.libelle", read_only=True)
     classe_nom = serializers.CharField(source="frais.classe.nom", read_only=True)
+    annee_academique_libelle = serializers.CharField(source="annee_academique.libelle", read_only=True)
 
     class Meta:
         model = Paiement
@@ -170,6 +171,8 @@ class PaiementSerializer(serializers.ModelSerializer):
             "frais",
             "frais_libelle",
             "classe_nom",
+            "annee_academique",
+            "annee_academique_libelle",
             "paiement_type",
             "montant_du",
             "montant_paye",

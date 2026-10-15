@@ -342,6 +342,15 @@ class Paiement(models.Model):
         null=True,
         blank=True,
     )
+    # Année académique à laquelle le paiement se rapporte : un étudiant réinscrit
+    # ne doit pas voir ses paiements de l'année précédente comptés sur la nouvelle.
+    annee_academique = models.ForeignKey(
+        "academique.AnneeAcademique",
+        on_delete=models.SET_NULL,
+        related_name="paiements",
+        null=True,
+        blank=True,
+    )
 
     TYPE_CHOICES = [
         ("FORMATION", "Frais de formation"),
@@ -391,20 +400,39 @@ class Paiement(models.Model):
     )
     date_paiement = models.DateTimeField(auto_now_add=True)
 
+    def resolve_annee_academique_id(self):
+        """Année du paiement : celle des frais, sinon l'année sélectionnée (si l'étudiant y est
+        inscrit), sinon la dernière inscription de l'étudiant."""
+        if self.frais_id and self.frais.classe_id and self.frais.classe.annee_academique_id:
+            return self.frais.classe.annee_academique_id
+        if not self.etudiant_id:
+            return None
+        from etudiants.models import Inscription
+        from academique.middleware import get_current_academic_year_id
+        inscriptions = Inscription.objects.filter(etudiant_id=self.etudiant_id, annee_academique_ref__isnull=False)
+        year_id = get_current_academic_year_id()
+        if year_id and inscriptions.filter(annee_academique_ref_id=year_id).exists():
+            return year_id
+        last = inscriptions.order_by("-date_inscription", "-id").first()
+        return last.annee_academique_ref_id if last else None
+
     def save(self, *args, **kwargs):
         is_new = self.pk is None
         if self.etudiant and self.etudiant.filiere:
             self.filiere = self.etudiant.filiere
+        if not self.annee_academique_id:
+            self.annee_academique_id = self.resolve_annee_academique_id()
 
         reference_amount = Decimal("0")
         if self.frais_id:
             reference_amount = self.frais.montant
         elif self.etudiant_id:
-            # Calculer le montant de référence via la classe de l'inscription
+            # Calculer le montant de référence via la classe de l'inscription de l'année du paiement
             from etudiants.models import Inscription
-            inscription = Inscription.objects.filter(
-                etudiant=self.etudiant
-            ).select_related("classe").order_by("-date_inscription").first()
+            inscriptions = Inscription.objects.filter(etudiant=self.etudiant).select_related("classe")
+            if self.annee_academique_id:
+                inscriptions = inscriptions.filter(annee_academique_ref_id=self.annee_academique_id)
+            inscription = inscriptions.order_by("-date_inscription").first()
             if inscription and inscription.classe:
                 frais_qs = Frais.objects.filter(classe=inscription.classe)
                 if self.paiement_type == "INSCRIPTION":
@@ -416,6 +444,8 @@ class Paiement(models.Model):
                 )["total"] or Decimal("0")
 
         existing_payments = Paiement.objects.filter(etudiant=self.etudiant)
+        if self.annee_academique_id:
+            existing_payments = existing_payments.filter(annee_academique_id=self.annee_academique_id)
         if self.frais_id:
             existing_payments = existing_payments.filter(frais=self.frais)
         else:
@@ -445,11 +475,16 @@ class Paiement(models.Model):
         if not self.etudiant_id or not self.filiere_id:
             return
 
-        plan = StudentPaymentPlan.objects.filter(
+        plans = StudentPaymentPlan.objects.filter(
             etudiant_id=self.etudiant_id,
-            filiere_id=self.filiere_id,
             status=StudentPaymentPlan.STATUS_ACTIVE,
-        ).first()
+        )
+        plan = None
+        if self.annee_academique_id:
+            # Plan rattaché à une classe de l'année du paiement
+            plan = plans.filter(classe__annee_academique_id=self.annee_academique_id).first()
+        if not plan:
+            plan = plans.filter(classe__isnull=True, filiere_id=self.filiere_id).first()
         if not plan:
             return
 
@@ -492,3 +527,13 @@ def add_months_with_day(start_date, offset, desired_day):
     last_day = calendar.monthrange(year, month)[1]
     day = min(desired_day, last_day)
     return start_date.replace(year=year, month=month, day=day)
+
+
+def paiements_de_l_annee(queryset, year_id):
+    """Restreint un queryset de paiements à une année académique."""
+    if not year_id:
+        return queryset
+    return queryset.filter(
+        models.Q(annee_academique_id=year_id)
+        | models.Q(annee_academique__isnull=True, frais__classe__annee_academique_id=year_id)
+    )

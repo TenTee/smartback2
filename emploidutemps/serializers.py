@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from datetime import time
-from .models import EmploiDuTemps, Salle
+from .models import EmploiDuTemps, Salle, periode_q
 from academique.models import Filiere, Niveau
 
 class SalleSerializer(serializers.ModelSerializer):
@@ -26,6 +26,18 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
 
     def validate(self, data):
         """Validation métier côté API (renvoie 400 au lieu de 500)."""
+        # Valeurs effectives (création ou mise à jour partielle)
+        inst = self.instance
+        for key in ("jour", "heure_debut", "heure_fin", "salle", "module"):
+            if key not in data and inst is not None:
+                data[key] = getattr(inst, key)
+        date_debut = data.get("date_debut", getattr(inst, "date_debut", None) if inst else None)
+        date_fin = data.get("date_fin", getattr(inst, "date_fin", None) if inst else None)
+        if date_debut and date_fin and date_fin < date_debut:
+            raise serializers.ValidationError({"date_fin": ["La date de fin de période doit être postérieure à la date de début."]})
+        if data["heure_fin"] <= data["heure_debut"]:
+            raise serializers.ValidationError({"heure_fin": ["L'heure de fin doit être après l'heure de début."]})
+        periode = periode_q(date_debut, date_fin)
 
         # 1️⃣ Bloquer la pause par cycle
         classe = data.get("classe")
@@ -47,7 +59,7 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
                 })
 
         # 2️⃣ Empêcher conflits de salle (hors tronc communs du même module)
-        conflits_salle = EmploiDuTemps.objects.filter(
+        conflits_salle = EmploiDuTemps.objects.filter(periode).filter(
             jour=data["jour"],
             salle=data["salle"],
             heure_debut__lt=data["heure_fin"],
@@ -65,7 +77,7 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
         # 3️⃣ Empêcher conflits de classe (même classe, même créneau)
         classe = data.get("classe")
         if classe:
-            conflits_classe = EmploiDuTemps.objects.filter(
+            conflits_classe = EmploiDuTemps.objects.filter(periode).filter(
                 jour=data["jour"],
                 classe=classe,
                 heure_debut__lt=data["heure_fin"],
@@ -83,7 +95,7 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
         # 4️⃣ Empêcher conflits de formateur (même formateur, même créneau)
         formateur = data.get("formateur")
         if formateur:
-            conflits_formateur = EmploiDuTemps.objects.filter(
+            conflits_formateur = EmploiDuTemps.objects.filter(periode).filter(
                 jour=data["jour"],
                 formateur=formateur,
                 heure_debut__lt=data["heure_fin"],
