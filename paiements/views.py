@@ -1,6 +1,6 @@
 from decimal import Decimal
 from django.db import models
-from django.db.models import Max, Sum, Value, DecimalField, Count
+from django.db.models import Max, Sum, Value, DecimalField, Count, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import generics
@@ -30,6 +30,7 @@ from .serializers import (
     StudentPaymentPlanSerializer,
 )
 from .schedule_resolver import compute_student_retard
+from .frais_etudiant import frais_etudiant
 
 
 class PaiementListCreate(generics.ListCreateAPIView):
@@ -77,13 +78,13 @@ class PaiementAggregated(APIView):
             montant_du_inscription = Decimal("0")
             montant_du_formation = Decimal("0")
 
+            frais_personnalises = False
             if classe:
-                frais_classe = Frais.objects.filter(classe=classe)
-                frais_inscription = frais_classe.filter(libelle__icontains="inscription")
-                frais_formation = frais_classe.exclude(libelle__icontains="inscription")
-
-                montant_du_inscription = frais_inscription.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
-                montant_du_formation = frais_formation.aggregate(total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))))["total"]
+                # Frais propres à l'étudiant s'ils ont été personnalisés, sinon ceux de la classe
+                fe = frais_etudiant(etudiant, classe)
+                montant_du_inscription = fe["inscription"]
+                montant_du_formation = fe["formation"]
+                frais_personnalises = fe["personnalise"]
 
             # Calculer les paiements effectués (inclure ceux avec et sans frais)
             paiements = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), year_id)
@@ -122,6 +123,7 @@ class PaiementAggregated(APIView):
                     "montant_paye_formation_total": float(montant_paye_formation_total),
                     "solde_restant_formation": solde_formation,
                     "derniere_date": derniere_date,
+                    "frais_personnalises": frais_personnalises,
                 }
             )
 
@@ -254,13 +256,9 @@ class FinancialDashboardView(APIView):
                 derniere_inscription = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
             classe = derniere_inscription.classe if derniere_inscription else None
             if classe:
-                frais_classe = Frais.objects.filter(classe=classe)
-                total_attendu_inscription += frais_classe.filter(
-                    libelle__icontains="inscription"
-                ).aggregate(t=Sum("montant"))["t"] or Decimal("0")
-                total_attendu_formation += frais_classe.exclude(
-                    libelle__icontains="inscription"
-                ).aggregate(t=Sum("montant"))["t"] or Decimal("0")
+                fe = frais_etudiant(etudiant, classe)
+                total_attendu_inscription += fe["inscription"]
+                total_attendu_formation += fe["formation"]
 
         # Montants recouvrés
         paiements_qs = paiements_de_l_annee(Paiement.objects.all(), year_id)
@@ -287,7 +285,7 @@ class FinancialDashboardView(APIView):
                 derniere_inscription = etudiant.inscriptions.filter(annee_academique_ref_id=year_id).first()
             classe = derniere_inscription.classe if derniere_inscription else None
             if classe:
-                total_du = Frais.objects.filter(classe=classe).aggregate(t=Sum("montant"))["t"] or Decimal("0")
+                total_du = frais_etudiant(etudiant, classe)["total"]
 
             total_paye = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), year_id).aggregate(
                 t=Sum("montant_paye"))["t"] or Decimal("0")
@@ -415,13 +413,9 @@ class MePaiementSummary(APIView):
         montant_du_inscription = Decimal("0")
         montant_du_formation = Decimal("0")
         if classe:
-            frais_classe = Frais.objects.filter(classe=classe)
-            montant_du_inscription = frais_classe.filter(libelle__icontains="inscription").aggregate(
-                total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
-            )["total"]
-            montant_du_formation = frais_classe.exclude(libelle__icontains="inscription").aggregate(
-                total=Coalesce(Sum("montant"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
-            )["total"]
+            fe = frais_etudiant(etudiant, classe)
+            montant_du_inscription = fe["inscription"]
+            montant_du_formation = fe["formation"]
         
         annee_id = derniere_inscription.annee_academique_ref_id if derniere_inscription else year_id
         paiements = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), annee_id)
@@ -432,18 +426,17 @@ class MePaiementSummary(APIView):
             total=Coalesce(Sum("montant_paye"), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
         )["total"]
 
-        plans = StudentPaymentPlan.objects.filter(etudiant=etudiant)
-        plan = (plans.filter(classe__annee_academique_id=annee_id).first() if annee_id else None) \
-            or plans.filter(classe__isnull=True).first()
+        # Échéancier effectif (personnel de l'étudiant, sinon celui de la classe ajusté à ses frais)
         installments = []
-        if plan:
-            for inst in plan.installments.all():
+        if classe:
+            resolved = compute_student_retard(etudiant, classe)
+            for inst in resolved["installments"]:
                 installments.append({
-                    "label": inst.label,
-                    "due_date": inst.due_date,
-                    "amount_due": inst.amount_due,
-                    "amount_paid": inst.amount_paid,
-                    "status": inst.status
+                    "label": inst["label"],
+                    "due_date": inst["due_date"],
+                    "amount_due": inst["amount_due"],
+                    "amount_paid": inst["amount_paid"],
+                    "status": inst["status"],
                 })
 
         return Response({
@@ -550,12 +543,29 @@ class StudentScheduleOverrideView(APIView):
         if not total_amount:
             total_amount = sum(Decimal(str(i.get("amount_due", 0))) for i in installments_data)
 
-        from .models import StudentPaymentPlan, StudentPaymentInstallment
+        from .models import StudentPaymentPlan, StudentPaymentInstallment, FraisEtudiant
 
-        # Delete existing override if any
-        StudentPaymentPlan.objects.filter(
-            etudiant=etudiant, classe=classe, is_override=True
-        ).delete()
+        try:
+            total_amount = Decimal(str(total_amount))
+            for item in installments_data:
+                if Decimal(str(item.get("amount_due", 0))) <= 0:
+                    return Response({"error": "Chaque tranche doit avoir un montant positif."}, status=status.HTTP_400_BAD_REQUEST)
+                if not item.get("due_date"):
+                    return Response({"error": "Chaque tranche doit avoir une date d'échéance."}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            return Response({"error": "Montants invalides."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Option : le total de l'échéancier devient les frais de formation de l'étudiant
+        if str(request.data.get("appliquer_aux_frais", "")).lower() in ("1", "true", "yes"):
+            fe, _ = FraisEtudiant.objects.get_or_create(etudiant=etudiant, classe=classe)
+            fe.frais_formation = total_amount
+            fe.modifie_par = request.user if request.user.is_authenticated else None
+            if not fe.motif:
+                fe.motif = "Aligné sur l'échéancier personnel"
+            fe.save()
+
+        # Un seul échéancier personnel par étudiant et par classe
+        StudentPaymentPlan.objects.filter(etudiant=etudiant, classe=classe).delete()
 
         plan = StudentPaymentPlan.objects.create(
             etudiant=etudiant,
@@ -630,3 +640,104 @@ class StudentScheduleOverrideView(APIView):
         result = compute_student_retard(etudiant, inscription.classe)
         serializer = ResolvedScheduleSerializer(result)
         return Response(serializer.data)
+
+
+
+def _inscription_annee(etudiant):
+    from etudiants.models import Inscription
+    year_id = get_current_academic_year_id()
+    qs = Inscription.objects.filter(etudiant=etudiant, classe__isnull=False).select_related("classe")
+    if year_id:
+        qs = qs.filter(Q(annee_academique_ref_id=year_id) | Q(classe__annee_academique_id=year_id))
+    return qs.order_by("-date_inscription", "-id").first()
+
+
+class FraisEtudiantView(APIView):
+    """Frais propres à un étudiant pour l'année sélectionnée (en-tête X-Academic-Year).
+
+    GET    : frais effectifs + frais de la classe + payé / reste par type
+    PUT    : {frais_inscription: montant|null, frais_formation: montant|null, motif}
+             (null = reprendre le montant de la classe)
+    DELETE : revenir aux frais de la classe
+    """
+
+    def _context(self, etudiant_id):
+        try:
+            etudiant = Etudiant.objects.get(pk=etudiant_id)
+        except Etudiant.DoesNotExist:
+            return None, None, Response({"error": "Etudiant introuvable"}, status=status.HTTP_404_NOT_FOUND)
+        inscription = _inscription_annee(etudiant)
+        if not inscription:
+            return etudiant, None, Response({"error": "Aucune inscription dans une classe pour cette année."}, status=status.HTTP_400_BAD_REQUEST)
+        return etudiant, inscription.classe, None
+
+    def _payload(self, etudiant, classe):
+        from .models import FraisEtudiant
+        fe = frais_etudiant(etudiant, classe)
+        paiements = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), classe.annee_academique_id)
+        paye_ins = paiements.filter(paiement_type="INSCRIPTION").aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+        paye_form = paiements.filter(paiement_type="FORMATION").aggregate(t=Sum("montant_paye"))["t"] or Decimal("0")
+        perso = FraisEtudiant.objects.filter(etudiant=etudiant, classe=classe).select_related("modifie_par").first()
+        return {
+            "etudiant_id": etudiant.id,
+            "classe_id": classe.id,
+            "classe_nom": classe.nom,
+            "inscription": {"du": float(fe["inscription"]), "classe": float(fe["classe_inscription"]), "personnalise": fe["personnalise_inscription"],
+                            "paye": float(paye_ins), "reste": float(fe["inscription"] - paye_ins)},
+            "formation": {"du": float(fe["formation"]), "classe": float(fe["classe_formation"]), "personnalise": fe["personnalise_formation"],
+                          "paye": float(paye_form), "reste": float(fe["formation"] - paye_form)},
+            "total": float(fe["total"]),
+            "personnalise": fe["personnalise"],
+            "motif": fe["motif"],
+            "modifie_le": perso.updated_at if perso else None,
+            "modifie_par": f"{perso.modifie_par.noms} {perso.modifie_par.prenoms}".strip() if perso and perso.modifie_par else "",
+        }
+
+    def get(self, request, etudiant_id):
+        etudiant, classe, err = self._context(etudiant_id)
+        if err:
+            return err
+        return Response(self._payload(etudiant, classe))
+
+    def put(self, request, etudiant_id):
+        from .models import FraisEtudiant
+        etudiant, classe, err = self._context(etudiant_id)
+        if err:
+            return err
+
+        def montant(key):
+            v = request.data.get(key)
+            if v in (None, ""):
+                return None
+            try:
+                d = Decimal(str(v))
+            except Exception:
+                raise ValueError(key)
+            if d < 0:
+                raise ValueError(key)
+            return d
+
+        try:
+            ins = montant("frais_inscription")
+            form = montant("frais_formation")
+        except ValueError as e:
+            return Response({str(e): ["Montant invalide."]}, status=status.HTTP_400_BAD_REQUEST)
+
+        if ins is None and form is None:
+            FraisEtudiant.objects.filter(etudiant=etudiant, classe=classe).delete()
+        else:
+            fe, _ = FraisEtudiant.objects.get_or_create(etudiant=etudiant, classe=classe)
+            fe.frais_inscription = ins
+            fe.frais_formation = form
+            fe.motif = str(request.data.get("motif") or "")[:2000]
+            fe.modifie_par = request.user if request.user.is_authenticated else None
+            fe.save()
+        return Response(self._payload(etudiant, classe))
+
+    def delete(self, request, etudiant_id):
+        from .models import FraisEtudiant
+        etudiant, classe, err = self._context(etudiant_id)
+        if err:
+            return err
+        FraisEtudiant.objects.filter(etudiant=etudiant, classe=classe).delete()
+        return Response(self._payload(etudiant, classe))

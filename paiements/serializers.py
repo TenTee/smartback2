@@ -117,6 +117,7 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
             "filiere",
             "filiere_nom",
             "policy",
+            "classe",
             "mode",
             "total_amount",
             "monthly_start_date",
@@ -128,6 +129,7 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at", "etudiant_nom", "filiere_nom", "installments"]
+        extra_kwargs = {"total_amount": {"required": False}, "classe": {"required": False}}
 
     def validate(self, attrs):
         etudiant = attrs.get("etudiant") or getattr(self.instance, "etudiant", None)
@@ -145,9 +147,25 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"policy": "Aucune politique d'echeancier n'est configuree pour cette filière."})
         attrs["policy"] = policy
 
+        # Le plan est rattaché à la classe de l'année : il devient l'échéancier propre de l'étudiant
+        if etudiant and not attrs.get("classe") and not getattr(self.instance, "classe_id", None):
+            from academique.middleware import get_current_academic_year_id
+            from .frais_etudiant import inscription_de_l_annee
+            ins = inscription_de_l_annee(etudiant, get_current_academic_year_id())
+            if ins and ins.classe_id:
+                attrs["classe"] = ins.classe
+        # Montant par défaut : frais de formation propres à l'étudiant
+        classe = attrs.get("classe") or getattr(self.instance, "classe", None)
+        if etudiant and classe and not attrs.get("total_amount"):
+            from .frais_etudiant import frais_etudiant
+            attrs["total_amount"] = frais_etudiant(etudiant, classe)["formation"]
+
         return attrs
 
     def create(self, validated_data):
+        # Un seul échéancier par étudiant et par classe
+        if validated_data.get("classe"):
+            StudentPaymentPlan.objects.filter(etudiant=validated_data["etudiant"], classe=validated_data["classe"]).delete()
         plan = StudentPaymentPlan.objects.create(**validated_data)
         plan.generate_installments()
         return plan
@@ -199,6 +217,7 @@ class PaiementAggregatedSerializer(serializers.Serializer):
     montant_paye_formation_total = serializers.DecimalField(max_digits=10, decimal_places=2)
     solde_restant_formation = serializers.DecimalField(max_digits=10, decimal_places=2)
     derniere_date = serializers.DateTimeField(allow_null=True)
+    frais_personnalises = serializers.BooleanField(default=False)
 
 
 class PaymentAlertSerializer(serializers.Serializer):
@@ -258,3 +277,6 @@ class ResolvedScheduleSerializer(serializers.Serializer):
     is_overdue = serializers.BooleanField()
     overdue_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     overdue_days = serializers.IntegerField()
+    frais = serializers.DictField(required=False)
+    ajuste = serializers.BooleanField(required=False)
+    total_attendu = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)

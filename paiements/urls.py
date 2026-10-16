@@ -6,6 +6,7 @@ from .views import (
     FilierePaymentPolicyDetailView,
     FilierePaymentPolicyListCreateView,
     FinancialDashboardView,
+    FraisEtudiantView,
     MePaiementSummary,
     PaiementAggregated,
     PaiementDetail,
@@ -31,5 +32,6 @@ urlpatterns = [
     path("paiements/class-schedules/", ClassePaymentScheduleListCreateView.as_view(), name="class-schedule-list"),
     path("paiements/class-schedules/<int:pk>/", ClassePaymentScheduleDetailView.as_view(), name="class-schedule-detail"),
     path("paiements/student-schedule/<int:etudiant_id>/", StudentResolvedScheduleView.as_view(), name="student-resolved-schedule"),
+    path("paiements/frais-etudiant/<int:etudiant_id>/", FraisEtudiantView.as_view(), name="frais-etudiant"),
     path("paiements/student-schedule/<int:etudiant_id>/override/", StudentScheduleOverrideView.as_view(), name="student-schedule-override"),
 ]

@@ -205,7 +205,8 @@ class StudentPaymentPlan(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["etudiant", "filiere"], name="unique_student_plan_per_filiere"),
+            # Un échéancier par étudiant et par classe (donc par année académique)
+            models.UniqueConstraint(fields=["etudiant", "classe"], name="unique_student_plan_per_classe"),
         ]
         ordering = ["-updated_at"]
 
@@ -424,7 +425,10 @@ class Paiement(models.Model):
             self.annee_academique_id = self.resolve_annee_academique_id()
 
         reference_amount = Decimal("0")
-        if self.frais_id:
+        perso_amount = self._montant_du_personnalise()
+        if perso_amount is not None:
+            reference_amount = perso_amount
+        elif self.frais_id:
             reference_amount = self.frais.montant
         elif self.etudiant_id:
             # Calculer le montant de référence via la classe de l'inscription de l'année du paiement
@@ -446,7 +450,7 @@ class Paiement(models.Model):
         existing_payments = Paiement.objects.filter(etudiant=self.etudiant)
         if self.annee_academique_id:
             existing_payments = existing_payments.filter(annee_academique_id=self.annee_academique_id)
-        if self.frais_id:
+        if self.frais_id and perso_amount is None:
             existing_payments = existing_payments.filter(frais=self.frais)
         else:
             existing_payments = existing_payments.filter(paiement_type=self.paiement_type)
@@ -458,7 +462,10 @@ class Paiement(models.Model):
         total_paid += self.montant_paye
 
         first = existing_payments.exclude(pk=self.pk).order_by("date_paiement").first()
-        if first and first.montant_du:
+        if perso_amount is not None:
+            # Frais personnalisés : le solde suit toujours le montant actuellement dû par l'étudiant
+            self.solde_restant = reference_amount - total_paid
+        elif first and first.montant_du:
             self.solde_restant = first.montant_du - total_paid
         else:
             self.solde_restant = reference_amount - total_paid
@@ -470,6 +477,25 @@ class Paiement(models.Model):
 
     def __str__(self):
         return f"{self.etudiant.nom} - {self.filiere.nom}"
+
+    def _montant_du_personnalise(self):
+        """Montant dû personnalisé de l'étudiant pour ce type de paiement (None si non personnalisé)."""
+        if not self.etudiant_id:
+            return None
+        from etudiants.models import Inscription
+        inscriptions = Inscription.objects.filter(etudiant_id=self.etudiant_id, classe__isnull=False).select_related("classe")
+        if self.annee_academique_id:
+            inscriptions = inscriptions.filter(
+                models.Q(annee_academique_ref_id=self.annee_academique_id) | models.Q(classe__annee_academique_id=self.annee_academique_id)
+            )
+        inscription = inscriptions.order_by("-date_inscription", "-id").first()
+        if not inscription:
+            return None
+        perso = FraisEtudiant.objects.filter(etudiant_id=self.etudiant_id, classe_id=inscription.classe_id).first()
+        if not perso:
+            return None
+        valeur = perso.frais_inscription if self.paiement_type == "INSCRIPTION" else perso.frais_formation
+        return Decimal(valeur) if valeur is not None else None
 
     def apply_to_payment_plan(self):
         if not self.etudiant_id or not self.filiere_id:
@@ -537,3 +563,33 @@ def paiements_de_l_annee(queryset, year_id):
         models.Q(annee_academique_id=year_id)
         | models.Q(annee_academique__isnull=True, frais__classe__annee_academique_id=year_id)
     )
+
+
+class FraisEtudiant(models.Model):
+    """Frais propres à un étudiant pour une classe (donc une année académique).
+
+    Un montant laissé vide reprend celui de la classe. Ces montants remplacent ceux de la
+    classe partout : scolarité, tableau de bord financier, portail étudiant, échéancier,
+    calcul du solde des paiements.
+    """
+
+    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name="frais_personnalises")
+    classe = models.ForeignKey("academique.Classe", on_delete=models.CASCADE, related_name="frais_etudiants")
+    frais_inscription = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    frais_formation = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    motif = models.TextField(blank=True, default="")
+    modifie_par = models.ForeignKey("users.CustomUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["etudiant", "classe"], name="unique_frais_etudiant_classe")]
+
+    def clean(self):
+        for f in ("frais_inscription", "frais_formation"):
+            v = getattr(self, f)
+            if v is not None and v < 0:
+                raise ValidationError({f: "Le montant ne peut pas être négatif."})
+
+    def __str__(self):
+        return f"Frais de {self.etudiant} ({self.classe})"

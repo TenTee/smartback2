@@ -56,8 +56,8 @@ class StudentSituationView(APIView):
             
             if inscription and inscription.classe:
                 from django.db.models import DecimalField
-                frais_classe = Frais.objects.filter(classe=inscription.classe)
-                montant_du = frais_classe.aggregate(total=Coalesce(Sum("montant"), Decimal("0"), output_field=DecimalField()))["total"]
+                from paiements.frais_etudiant import frais_etudiant
+                montant_du = frais_etudiant(etudiant, inscription.classe)["total"]
                 
                 paiements_qs = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), inscription.annee_academique_ref_id or inscription.classe.annee_academique_id)
                 montant_paye = paiements_qs.aggregate(total=Coalesce(Sum("montant_paye"), Decimal("0"), output_field=DecimalField()))["total"]
@@ -133,8 +133,8 @@ class StudentHistoryView(APIView):
                 montant_du = Decimal("0")
                 montant_paye = Decimal("0")
                 if ins.classe:
-                    frais_classe = Frais.objects.filter(classe=ins.classe)
-                    montant_du = frais_classe.aggregate(total=Coalesce(Sum("montant"), Decimal("0"), output_field=DecimalField()))["total"]
+                    from paiements.frais_etudiant import frais_etudiant
+                    montant_du = frais_etudiant(etudiant, ins.classe)["total"]
                     
                     paiements_qs = paiements_de_l_annee(Paiement.objects.filter(etudiant=etudiant), ins.annee_academique_ref_id or ins.classe.annee_academique_id)
                     montant_paye = paiements_qs.aggregate(total=Coalesce(Sum("montant_paye"), Decimal("0"), output_field=DecimalField()))["total"]
