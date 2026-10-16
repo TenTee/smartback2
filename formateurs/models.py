@@ -23,6 +23,11 @@ class Formateur(models.Model):
     type_formateur = models.CharField(max_length=20, choices=TYPE_CHOICES, default='permanent')
     salaire = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     taux_horaire = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    # Dernier mot de passe généré par l'administration (visible par l'admin tant que le
+    # formateur ne l'a pas changé lui-même ; effacé dès qu'il le modifie).
+    mot_de_passe_initial = models.CharField(max_length=128, blank=True, null=True)
+    mdp_modifie_par_formateur = models.BooleanField(default=False)
+    identifiants_maj_le = models.DateTimeField(null=True, blank=True)
 
     @property
     def is_vacataire(self):

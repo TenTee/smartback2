@@ -76,6 +76,16 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({"nouveau": list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
         user.set_password(nouveau)
         user.save()
+        # Le mot de passe choisi par l'utilisateur n'est jamais conservé en clair
+        form = getattr(user, "formateur_profile", None)
+        if form is not None:
+            form.mot_de_passe_initial = None
+            form.mdp_modifie_par_formateur = True
+            form.save(update_fields=["mot_de_passe_initial", "mdp_modifie_par_formateur"])
+        etu = getattr(user, "etudiant_profile", None)
+        if etu is not None and getattr(etu, "initial_password", None):
+            etu.initial_password = None
+            etu.save(update_fields=["initial_password"])
         return Response({"detail": "Mot de passe modifié."})
 
     @action(detail=True, methods=["post"], url_path="reset-password")

@@ -46,7 +46,11 @@ class FormateurListCreateView(generics.ListCreateAPIView):
             user.save()
 
             formateur.user = user
-            formateur.save(update_fields=['user'])
+            formateur.mot_de_passe_initial = raw_password
+            formateur.mdp_modifie_par_formateur = False
+            from django.utils import timezone as _tz
+            formateur.identifiants_maj_le = _tz.now()
+            formateur.save(update_fields=['user', 'mot_de_passe_initial', 'mdp_modifie_par_formateur', 'identifiants_maj_le'])
 
             formateur._generated_username = username
             formateur._generated_password = raw_password
@@ -116,12 +120,118 @@ class FormateurGenerateAccountView(generics.GenericAPIView):
         user.save()
 
         formateur.user = user
-        formateur.save(update_fields=['user'])
+        formateur.mot_de_passe_initial = raw_password
+        formateur.mdp_modifie_par_formateur = False
+        from django.utils import timezone as _tz
+        formateur.identifiants_maj_le = _tz.now()
+        formateur.save(update_fields=['user', 'mot_de_passe_initial', 'mdp_modifie_par_formateur', 'identifiants_maj_le'])
 
         return Response({
             'username': username,
             'password': raw_password,
         })
+
+
+def _est_admin(user):
+    """Les comptes étudiant / formateur n'ont pas accès aux identifiants des formateurs."""
+    return bool(user and user.is_authenticated and not hasattr(user, 'etudiant_profile') and not hasattr(user, 'formateur_profile'))
+
+
+def _identifiants(formateur):
+    u = formateur.user
+    return {
+        'a_un_compte': bool(u),
+        'username': u.username if u else None,
+        'email': u.email if u else formateur.email,
+        'mot_de_passe': formateur.mot_de_passe_initial if u else None,
+        'mdp_modifie_par_formateur': formateur.mdp_modifie_par_formateur,
+        'compte_actif': bool(u and u.is_active),
+        'derniere_connexion': u.last_login if u else None,
+        'identifiants_maj_le': formateur.identifiants_maj_le,
+    }
+
+
+class FormateurIdentifiantsView(generics.GenericAPIView):
+    """Identifiants du compte portail d'un formateur (administration uniquement).
+
+    GET   : identifiant, e-mail, dernier mot de passe généré (s'il n'a pas été changé par le formateur), état du compte
+    POST  : réinitialise — {mot_de_passe?: str (sinon généré), nouvel_identifiant?: bool}
+            crée le compte s'il n'existe pas encore
+    PATCH : {compte_actif: bool} active / désactive l'accès au portail
+    """
+    queryset = Formateur.objects.all()
+    permission_classes = [IsAuthenticated]
+
+    def _check(self, request):
+        if not _est_admin(request.user):
+            return Response({'detail': 'Accès réservé à l\'administration.'}, status=status.HTTP_403_FORBIDDEN)
+        return None
+
+    def get(self, request, pk=None):
+        refus = self._check(request)
+        if refus:
+            return refus
+        return Response(_identifiants(self.get_object()))
+
+    def post(self, request, pk=None):
+        from django.utils import timezone
+        from django.utils.crypto import get_random_string
+        from users.models import CustomUser
+
+        refus = self._check(request)
+        if refus:
+            return refus
+        formateur = self.get_object()
+        mdp = (request.data.get('mot_de_passe') or '').strip()
+        if mdp and len(mdp) < 8:
+            return Response({'mot_de_passe': ['8 caractères minimum.']}, status=status.HTTP_400_BAD_REQUEST)
+        if not mdp:
+            mdp = get_random_string(10, allowed_chars='abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789')
+
+        user = formateur.user
+        nouvel_identifiant = str(request.data.get('nouvel_identifiant', '')).lower() in ('1', 'true', 'yes')
+        if not user or nouvel_identifiant:
+            nom_parts = formateur.nom.lower().replace(' ', '').split()
+            base = '.'.join(nom_parts) if nom_parts else 'formateur'
+            username = f"{base}{get_random_string(3, allowed_chars='0123456789')}"
+            while CustomUser.objects.filter(username=username).exists():
+                username = f"{base}{get_random_string(3, allowed_chars='0123456789')}"
+        if not user:
+            existant = CustomUser.objects.filter(email=formateur.email).first() if formateur.email else None
+            if existant:
+                # Compte orphelin avec le même e-mail : on le rattache s'il n'appartient à personne d'autre
+                pris = Formateur.objects.filter(user=existant).exclude(pk=formateur.pk).exists() or hasattr(existant, 'etudiant_profile')
+                if pris:
+                    return Response({'detail': 'Un autre compte utilise déjà cet e-mail.'}, status=status.HTTP_400_BAD_REQUEST)
+                user = existant
+                user.role = 'formateur'
+            else:
+                user = CustomUser(noms=formateur.nom, prenoms='', email=formateur.email, username=username, role='formateur')
+        elif nouvel_identifiant:
+            CustomUser.objects.filter(pk=user.pk).update(username=username)
+            user.username = username
+        user.set_password(mdp)
+        user.is_active = True
+        user.save()
+        formateur.user = user
+        formateur.mot_de_passe_initial = mdp
+        formateur.mdp_modifie_par_formateur = False
+        formateur.identifiants_maj_le = timezone.now()
+        formateur.save(update_fields=['user', 'mot_de_passe_initial', 'mdp_modifie_par_formateur', 'identifiants_maj_le'])
+        return Response(_identifiants(formateur))
+
+    def patch(self, request, pk=None):
+        refus = self._check(request)
+        if refus:
+            return refus
+        formateur = self.get_object()
+        if not formateur.user:
+            return Response({'detail': 'Ce formateur n\'a pas encore de compte.'}, status=status.HTTP_400_BAD_REQUEST)
+        if 'compte_actif' in request.data:
+            actif = str(request.data.get('compte_actif')).lower() in ('1', 'true', 'yes')
+            formateur.user.is_active = actif
+            formateur.user.save(update_fields=['is_active'])
+        return Response(_identifiants(formateur))
 
 
 class FormateurPortalViewSet(viewsets.ViewSet):
