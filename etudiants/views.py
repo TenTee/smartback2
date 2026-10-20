@@ -326,3 +326,46 @@ class StudentPortalViewSet(viewsets.ReadOnlyModelViewSet):
             "lieu": "Douala",
         }
         return Response(data)
+
+
+
+class EtudiantIdentifiantsView(APIView):
+    """Identifiants du compte portail d'un étudiant (administration uniquement).
+
+    GET : consulter · POST : réinitialiser {mot_de_passe?, nouvel_identifiant?} (crée le compte s'il n'existe pas)
+    PATCH : {compte_actif}
+    """
+
+    def _traiter(self, request, pk):
+        from users.identifiants import appliquer_requete, creer_ou_rattacher_compte, infos
+        try:
+            etudiant = Etudiant.objects.select_related("user").get(pk=pk)
+        except Etudiant.DoesNotExist:
+            return Response({"detail": "Étudiant introuvable."}, status=404)
+
+        def creer():
+            parts = (etudiant.nom or "").split(" ", 1)
+            occupes = set(Etudiant.objects.exclude(pk=etudiant.pk).exclude(user__isnull=True).values_list("user_id", flat=True))
+            return creer_ou_rattacher_compte(parts[0], parts[1] if len(parts) > 1 else "", etudiant.email, "etudiant", occupes)
+
+        code, data = appliquer_requete(request, etudiant.user, creer)
+        if code != 200:
+            return Response(data, status=code)
+        if data is not None and request.method == "POST":
+            # Garde l'ancien champ « mot de passe initial » à jour pour les écrans existants
+            etudiant.user = data
+            etudiant.initial_password = data.mot_de_passe_provisoire
+            etudiant.save(update_fields=["user", "initial_password"])
+        etudiant.refresh_from_db()
+        if etudiant.user:
+            etudiant.user.refresh_from_db()
+        return Response(infos(etudiant.user, etudiant.email))
+
+    def get(self, request, pk):
+        return self._traiter(request, pk)
+
+    def post(self, request, pk):
+        return self._traiter(request, pk)
+
+    def patch(self, request, pk):
+        return self._traiter(request, pk)

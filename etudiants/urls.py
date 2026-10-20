@@ -2,6 +2,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
+    EtudiantIdentifiantsView,
     EtudiantListCreateView,
     EtudiantRetrieveUpdateDeleteView,
     ExportEtudiantDocumentsView,
@@ -28,6 +29,7 @@ urlpatterns = [
     path("etudiants/<int:pk>/export-documents/", ExportEtudiantDocumentsView.as_view(), name="etudiant-export-documents"),
     path("etudiants/<int:pk>/documents/", EtudiantDocumentUploadView.as_view(), name="etudiant-upload-document"),
     path("etudiants/<int:pk>/valider-inscription/", ValiderInscriptionView.as_view(), name="etudiant-valider-inscription"),
+    path("etudiants/<int:pk>/identifiants/", EtudiantIdentifiantsView.as_view(), name="etudiant-identifiants"),
     path("etudiants/<int:pk>/reinscription/", ReinscriptionView.as_view(), name="etudiant-reinscription"),
     
     path("inscriptions/", InscriptionListCreateView.as_view(), name="inscription-list-create"),

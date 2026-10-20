@@ -46,6 +46,12 @@ class CustomUser(AbstractUser):
     is_active = models.BooleanField(default=True)  # ✅ désactiver sans supprimer
     date_created = models.DateTimeField(auto_now_add=True)  # ✅ date de création
 
+    # Dernier mot de passe généré / défini par l'administration, consultable par l'admin
+    # tant que l'utilisateur ne l'a pas changé lui-même (effacé dès qu'il le change).
+    mot_de_passe_provisoire = models.CharField(max_length=128, null=True, blank=True)
+    mdp_modifie_par_utilisateur = models.BooleanField(default=False)
+    identifiants_maj_le = models.DateTimeField(null=True, blank=True)
+
     def save(self, *args, **kwargs):
         # Génération automatique du username si vide
         if not self.username:
@@ -58,6 +64,10 @@ class CustomUser(AbstractUser):
             raw_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
             self._raw_password = raw_password  # ✅ stock temporaire pour le signal
             self.set_password(raw_password)
+            self.mot_de_passe_provisoire = raw_password
+            self.mdp_modifie_par_utilisateur = False
+            from django.utils import timezone
+            self.identifiants_maj_le = timezone.now()
 
         super().save(*args, **kwargs)
 
@@ -66,6 +76,10 @@ class CustomUser(AbstractUser):
         raw_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
         self._raw_password = raw_password  # stock temporaire pour le signal
         self.set_password(raw_password)
+        self.mot_de_passe_provisoire = raw_password
+        self.mdp_modifie_par_utilisateur = False
+        from django.utils import timezone
+        self.identifiants_maj_le = timezone.now()
         self.save()
         return raw_password
 

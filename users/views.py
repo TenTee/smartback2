@@ -28,6 +28,10 @@ class UserViewSet(viewsets.ModelViewSet):
         raw_password = get_random_string(8)
         user.set_password(raw_password)
         user._raw_password = raw_password  # exposé via serializer
+        from django.utils import timezone as _tz
+        user.mot_de_passe_provisoire = raw_password
+        user.mdp_modifie_par_utilisateur = False
+        user.identifiants_maj_le = _tz.now()
 
         # Générer un username si besoin
         if not user.username:
@@ -75,6 +79,8 @@ class UserViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as e:
             return Response({"nouveau": list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
         user.set_password(nouveau)
+        user.mot_de_passe_provisoire = None
+        user.mdp_modifie_par_utilisateur = True
         user.save()
         # Le mot de passe choisi par l'utilisateur n'est jamais conservé en clair
         form = getattr(user, "formateur_profile", None)
@@ -88,13 +94,26 @@ class UserViewSet(viewsets.ModelViewSet):
             etu.save(update_fields=["initial_password"])
         return Response({"detail": "Mot de passe modifié."})
 
+    @action(detail=True, methods=["get", "post", "patch"], url_path="identifiants")
+    def identifiants(self, request, pk=None):
+        """Identifiants d'un utilisateur : consulter (GET), réinitialiser (POST
+        {mot_de_passe?, nouvel_identifiant?}), activer / suspendre (PATCH {compte_actif})."""
+        from .identifiants import appliquer_requete, infos
+        user = self.get_object()
+        code, data = appliquer_requete(request, user)
+        if code != 200:
+            return Response(data, status=code)
+        user.refresh_from_db()
+        return Response(infos(user))
+
     @action(detail=True, methods=["post"], url_path="reset-password")
     def reset_password(self, request, pk=None):
+        from .identifiants import est_admin, reinitialiser
+        if not est_admin(request.user):
+            return Response({"detail": "Accès réservé à l'administration."}, status=status.HTTP_403_FORBIDDEN)
         user = self.get_object()
-        new_password = get_random_string(8)
-        user.set_password(new_password)
+        new_password = reinitialiser(user)
         user._raw_password = new_password
-        user.save()
         return Response(
             {
                 "username": user.username,
