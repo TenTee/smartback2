@@ -9,6 +9,8 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
     module_nom = serializers.CharField(source="module.nom", read_only=True)
     parent_nom = serializers.CharField(source="etudiant.nom_parent", read_only=True)
     parent_whatsapp = serializers.CharField(source="etudiant.whatsapp_parent", read_only=True)
+    formateur_nom = serializers.CharField(source="emploi.formateur.nom", read_only=True, default="")
+    classe_nom = serializers.CharField(source="emploi.classe.nom", read_only=True, default="")
 
     class Meta:
         model = AssiduiteRecord
@@ -20,6 +22,11 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
             "filiere_nom",
             "module",
             "module_nom",
+            "emploi",
+            "heure_debut",
+            "heure_fin",
+            "formateur_nom",
+            "classe_nom",
             "date",
             "type",
             "minutes_retard",
@@ -29,6 +36,8 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
             "parent_whatsapp",
             "created_at",
         ]
+        read_only_fields = ["heure_debut", "heure_fin"]
+        extra_kwargs = {"module": {"required": False}}
 
     def validate(self, attrs):
         type_value = attrs.get("type") or (self.instance.type if self.instance else None)
@@ -44,5 +53,37 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
         
         if justifie and not justificatif:
             raise serializers.ValidationError({"justificatif": "Un fichier justificatif est obligatoire pour justifier une absence ou un retard."})
+
+        # Le cours est fixé par l'emploi du temps : l'absence / le retard porte sur une séance du jour
+        from academique.middleware import get_current_academic_year_id
+        from .seances_jour import seances_du_jour
+        etudiant = attrs.get("etudiant") or (self.instance.etudiant if self.instance else None)
+        jour = attrs.get("date") or (self.instance.date if self.instance else None)
+        emploi = attrs.get("emploi") if "emploi" in attrs else (self.instance.emploi if self.instance else None)
+        verifier = self.instance is None or any(k in attrs for k in ("emploi", "date", "etudiant"))
+        if etudiant and jour and verifier:
+            classe, seances = seances_du_jour(etudiant, jour, get_current_academic_year_id())
+            if emploi is None:
+                if self.instance is None or "emploi" in attrs:
+                    if not seances:
+                        raise serializers.ValidationError({"emploi": f"Aucun cours n'est programmé le {jour.strftime('%d-%m-%Y')} pour la classe de l'étudiant{f' ({classe.nom})' if classe else ''} dans l'emploi du temps."})
+                    raise serializers.ValidationError({"emploi": "Choisissez la séance du jour concernée."})
+            else:
+                if emploi.id not in {e.id for e in seances}:
+                    raise serializers.ValidationError({"emploi": "Cette séance n'a pas lieu ce jour-là pour la classe de l'étudiant."})
+                attrs["module"] = emploi.module
+                attrs["heure_debut"] = emploi.heure_debut
+                attrs["heure_fin"] = emploi.heure_fin
+                doublon = AssiduiteRecord.objects.filter(etudiant=etudiant, emploi=emploi, date=jour)
+                if self.instance:
+                    doublon = doublon.exclude(pk=self.instance.pk)
+                if doublon.exists():
+                    raise serializers.ValidationError({"emploi": f"Une absence / un retard est déjà enregistré pour cette séance ({emploi.module.nom})."})
+                if type_value == "RETARD" and minutes is not None:
+                    duree = (emploi.heure_fin.hour * 60 + emploi.heure_fin.minute) - (emploi.heure_debut.hour * 60 + emploi.heure_debut.minute)
+                    if minutes > duree:
+                        raise serializers.ValidationError({"minutes_retard": f"Le retard ne peut pas dépasser la durée de la séance ({duree} min)."})
+        if not attrs.get("module") and not (self.instance and self.instance.module_id):
+            raise serializers.ValidationError({"emploi": "Choisissez la séance du jour concernée."})
 
         return attrs

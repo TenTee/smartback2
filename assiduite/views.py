@@ -1,4 +1,6 @@
 from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
 from .models import AssiduiteRecord
 from .serializers import AssiduiteRecordSerializer
 from academique.middleware import get_current_academic_year_id
@@ -49,3 +51,37 @@ class AssiduiteRecordViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(date__lte=date_to)
 
         return queryset.distinct()
+
+    @action(detail=False, methods=["get"], url_path="seances-du-jour")
+    def seances_du_jour(self, request):
+        """Cours programmés pour la classe de l'étudiant à une date : ?etudiant=&date=YYYY-MM-DD"""
+        from django.utils.dateparse import parse_date
+        from etudiants.models import Etudiant
+        from .seances_jour import seances_du_jour
+
+        jour = parse_date(request.query_params.get("date") or "")
+        try:
+            etudiant = Etudiant.objects.get(pk=request.query_params.get("etudiant"))
+        except (Etudiant.DoesNotExist, ValueError, TypeError):
+            return Response({"detail": "Étudiant introuvable."}, status=404)
+        if not jour:
+            return Response({"detail": "Date invalide."}, status=400)
+        classe, seances = seances_du_jour(etudiant, jour, get_current_academic_year_id())
+        deja = {}
+        for r in AssiduiteRecord.objects.filter(etudiant=etudiant, date=jour, emploi__isnull=False):
+            deja[r.emploi_id] = {"id": r.id, "type": r.type}
+        return Response({
+            "date": jour,
+            "classe_id": classe.id if classe else None,
+            "classe_nom": classe.nom if classe else None,
+            "seances": [{
+                "emploi_id": e.id,
+                "heure_debut": e.heure_debut,
+                "heure_fin": e.heure_fin,
+                "module_id": e.module_id,
+                "module_nom": e.module.nom,
+                "formateur_nom": e.formateur.nom if e.formateur_id else "",
+                "salle_nom": e.salle.nom if e.salle_id else "",
+                "deja": deja.get(e.id),
+            } for e in seances],
+        })
