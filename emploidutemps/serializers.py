@@ -20,9 +20,44 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
     niveau = serializers.PrimaryKeyRelatedField(queryset=Niveau.objects.all(), required=False, allow_null=True)
     salle = serializers.PrimaryKeyRelatedField(queryset=Salle.objects.all())
 
+    # Tronc commun
+    tronc_commun = serializers.UUIDField(read_only=True)
+    tronc_commun_classes = serializers.SerializerMethodField()
+    classes_tronc_commun = serializers.ListField(
+        child=serializers.IntegerField(), write_only=True, required=False, allow_null=True,
+        help_text="Classes du tronc commun (création / modification). Liste vide = retirer les autres classes.",
+    )
+
     class Meta:
         model = EmploiDuTemps
         fields = "__all__"
+
+    def get_tronc_commun_classes(self, obj):
+        """Autres classes suivant ce cours en tronc commun (même créneau)."""
+        if not obj.tronc_commun:
+            return []
+        cache = self.context.setdefault("_tronc_commun", {})
+        if obj.tronc_commun not in cache:
+            cache[obj.tronc_commun] = list(
+                EmploiDuTemps.objects.filter(tronc_commun=obj.tronc_commun)
+                .select_related("classe").values("id", "classe_id", "classe__nom")
+            )
+        return [
+            {"emploi_id": m["id"], "classe_id": m["classe_id"], "classe_nom": m["classe__nom"]}
+            for m in cache[obj.tronc_commun] if m["id"] != obj.id
+        ]
+
+    def _hors_groupe(self, qs):
+        """Ignore ce créneau, les autres classes de son tronc commun et les créneaux qui vont y être rattachés."""
+        inst = self.instance
+        if inst is not None and inst.pk:
+            qs = qs.exclude(pk=inst.pk)
+            if inst.tronc_commun:
+                qs = qs.exclude(tronc_commun=inst.tronc_commun)
+        a_rattacher = getattr(self, "_a_rattacher", None)
+        if a_rattacher is not None:
+            qs = qs.exclude(pk__in=a_rattacher)
+        return qs
 
     def validate(self, data):
         """Validation métier côté API (renvoie 400 au lieu de 500)."""
@@ -38,6 +73,15 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
         if data["heure_fin"] <= data["heure_debut"]:
             raise serializers.ValidationError({"heure_fin": ["L'heure de fin doit être après l'heure de début."]})
         periode = periode_q(date_debut, date_fin)
+
+        # Classes du tronc commun déjà programmées séparément sur ce même cours / créneau : rattachées, pas en conflit
+        self._a_rattacher = None
+        if data.get("classes_tronc_commun"):
+            from .tronc_commun import adoptables
+            self._a_rattacher = list(adoptables(
+                data["module"].pk, data["classes_tronc_commun"], data["jour"], data["heure_debut"], data["heure_fin"],
+                date_debut, date_fin, sauf_pk=getattr(inst, "pk", None),
+            ).values_list("pk", flat=True))
 
         # 1️⃣ Bloquer la pause par cycle
         classe = data.get("classe")
@@ -64,10 +108,8 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
             salle=data["salle"],
             heure_debut__lt=data["heure_fin"],
             heure_fin__gt=data["heure_debut"]
-        ).exclude(module=data["module"])  # ✅ ignore duplications du même module
-
-        if self.instance and self.instance.pk:
-            conflits_salle = conflits_salle.exclude(pk=self.instance.pk)
+        )
+        conflits_salle = self._hors_groupe(conflits_salle)
 
         if conflits_salle.exists():
             raise serializers.ValidationError({
@@ -82,7 +124,7 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
                 classe=classe,
                 heure_debut__lt=data["heure_fin"],
                 heure_fin__gt=data["heure_debut"]
-            ).exclude(module=data["module"])
+            )
 
             if self.instance and self.instance.pk:
                 conflits_classe = conflits_classe.exclude(pk=self.instance.pk)
@@ -100,10 +142,8 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
                 formateur=formateur,
                 heure_debut__lt=data["heure_fin"],
                 heure_fin__gt=data["heure_debut"]
-            ).exclude(module=data["module"])
-
-            if self.instance and self.instance.pk:
-                conflits_formateur = conflits_formateur.exclude(pk=self.instance.pk)
+            )
+            conflits_formateur = self._hors_groupe(conflits_formateur)
 
             if conflits_formateur.exists():
                 raise serializers.ValidationError({

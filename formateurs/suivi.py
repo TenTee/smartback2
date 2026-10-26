@@ -147,8 +147,17 @@ def compute_suivi(formateur, annee_id=None, now=None):
         "nb_classes_commencees": len(classes_commencees),
         "taux": round(min(100.0, 100 * totaux["heures_dispensees"] / totaux["heures_prevues"]), 1) if totaux["heures_prevues"] else 0,
     })
+    # Heures réellement passées devant les étudiants : une séance en tronc commun (plusieurs classes
+    # en même temps) n'est comptée qu'une fois pour le formateur.
+    face = {}
+    for sr in seances_annee.filter(formateur=formateur, statut=SeanceRealisee.EFFECTUEE).select_related("emploi"):
+        groupe = sr.emploi.tronc_commun if sr.emploi_id and sr.emploi is not None else None
+        cle = ("tc", str(groupe), sr.date) if groupe else ("s", sr.id)
+        face[cle] = max(face.get(cle, 0), sr.duree_minutes)
+    totaux["heures_face_a_face"] = round(sum(face.values()) / 60, 2)
+    totaux["heures_tronc_commun"] = round(max(0.0, totaux["heures_dispensees"] - totaux["heures_face_a_face"]), 2)
     try:
-        montant = float(formateur.taux_horaire or 0) * totaux["heures_dispensees"]
+        montant = float(formateur.taux_horaire or 0) * totaux["heures_face_a_face"]
     except (TypeError, ValueError):
         montant = 0
     return {

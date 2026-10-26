@@ -55,6 +55,17 @@ class EmploiDuTemps(models.Model):
     # Vide = créneau permanent (anciens emplois du temps).
     date_debut = models.DateField(null=True, blank=True)
     date_fin = models.DateField(null=True, blank=True)
+    # Tronc commun : même cours donné au même moment à plusieurs classes (même formateur, même salle).
+    # Tous les créneaux du groupe partagent cet identifiant ; ils sont modifiés ensemble.
+    tronc_commun = models.UUIDField(null=True, blank=True, db_index=True)
+
+    def _hors_groupe(self, qs):
+        """Exclut ce créneau et les autres classes de son tronc commun (qui partagent salle et formateur)."""
+        if self.pk:
+            qs = qs.exclude(pk=self.pk)
+        if self.tronc_commun:
+            qs = qs.exclude(tronc_commun=self.tronc_commun)
+        return qs
 
     def clean(self):
         """Validation métier (admin/tests)."""
@@ -89,16 +100,13 @@ class EmploiDuTemps(models.Model):
             if self.heure_debut < pause_fin and self.heure_fin > pause_debut:
                 raise ValidationError("⏸️ Impossible de programmer une séance pendant la pause déjeuner (12h00–13h00).")
 
-        # 2️⃣ Empêcher conflits de salle (hors tronc communs du même module)
-        conflits_salle = EmploiDuTemps.objects.filter(periode).filter(
+        # 2️⃣ Empêcher conflits de salle (hors classes du même tronc commun)
+        conflits_salle = self._hors_groupe(EmploiDuTemps.objects.filter(periode).filter(
             jour=self.jour,
             salle=self.salle,
             heure_debut__lt=self.heure_fin,
             heure_fin__gt=self.heure_debut
-        ).exclude(module=self.module)
-
-        if self.pk:
-            conflits_salle = conflits_salle.exclude(pk=self.pk)
+        ))
 
         if conflits_salle.exists():
             raise ValidationError("⚠️ Conflit de salle : cette salle est déjà occupée à ce créneau.")
@@ -110,7 +118,7 @@ class EmploiDuTemps(models.Model):
                 classe=self.classe,
                 heure_debut__lt=self.heure_fin,
                 heure_fin__gt=self.heure_debut
-            ).exclude(module=self.module)
+            )
 
             if self.pk:
                 conflits_classe = conflits_classe.exclude(pk=self.pk)
@@ -120,15 +128,12 @@ class EmploiDuTemps(models.Model):
 
         # 4️⃣ Empêcher conflits de formateur
         if self.formateur_id:
-            conflits_formateur = EmploiDuTemps.objects.filter(periode).filter(
+            conflits_formateur = self._hors_groupe(EmploiDuTemps.objects.filter(periode).filter(
                 jour=self.jour,
                 formateur=self.formateur,
                 heure_debut__lt=self.heure_fin,
                 heure_fin__gt=self.heure_debut
-            ).exclude(module=self.module)
-
-            if self.pk:
-                conflits_formateur = conflits_formateur.exclude(pk=self.pk)
+            ))
 
             if conflits_formateur.exists():
                 raise ValidationError("⚠️ Conflit de formateur : ce formateur a déjà un cours à ce créneau.")
@@ -146,16 +151,14 @@ class EmploiDuTemps(models.Model):
         # and Module doesn't have a direct link to Filieres in the new system yet (only through CourseAssignment)
 
     def delete(self, *args, **kwargs):
-        """Suppression synchronisée des tronc communs."""
-        # Uniquement les copies de la même période (sinon on effacerait les autres semaines)
-        EmploiDuTemps.objects.filter(
-            module=self.module,
-            jour=self.jour,
-            heure_debut=self.heure_debut,
-            heure_fin=self.heure_fin,
-            date_debut=self.date_debut,
-            date_fin=self.date_fin,
-        ).delete()
+        """Supprime ce créneau uniquement (pour tout le tronc commun : voir la vue, ?tout_le_tronc_commun=1)."""
+        groupe = self.tronc_commun
+        resultat = super().delete(*args, **kwargs)
+        if groupe:
+            restants = EmploiDuTemps.objects.filter(tronc_commun=groupe)
+            if restants.count() == 1:  # une seule classe : ce n'est plus un tronc commun
+                restants.update(tronc_commun=None)
+        return resultat
 
     def __str__(self):
         return f"{self.filiere} | {self.jour} {self.heure_debut}-{self.heure_fin} | {self.module} ({self.formateur})"

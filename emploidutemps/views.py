@@ -77,8 +77,13 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
             if str(data.get("remplacer", "")).lower() in ("1", "true", "yes", "oui"):
                 for old in cible:
                     super(EmploiDuTemps, old).delete()
-            for ed in source.select_related("module", "classe"):
+            from .tronc_commun import nouvel_identifiant
+            groupes = {}
+            for ed in source.select_related("module", "classe").order_by("tronc_commun", "id"):
+                if ed.tronc_commun and ed.tronc_commun not in groupes:
+                    groupes[ed.tronc_commun] = nouvel_identifiant()
                 copie = EmploiDuTemps(
+                    tronc_commun=groupes.get(ed.tronc_commun) if ed.tronc_commun else None,
                     filiere_id=ed.filiere_id, niveau_id=ed.niveau_id, classe_id=ed.classe_id,
                     module_id=ed.module_id, formateur_id=ed.formateur_id, jour=ed.jour,
                     heure_debut=ed.heure_debut, heure_fin=ed.heure_fin, salle_id=ed.salle_id,
@@ -157,8 +162,13 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
             if not d or not date_valide_pour(e, d, annee or (e.classe.annee_academique if e.classe else None)):
                 erreurs.append(f"{label} : cette date ne correspond pas au créneau.")
                 continue
+            groupe = [e]
+            if e.tronc_commun:
+                # Une séance en tronc commun est validée pour toutes les classes du groupe
+                groupe += [m for m in EmploiDuTemps.objects.filter(tronc_commun=e.tronc_commun).exclude(pk=e.pk)
+                           if date_valide_pour(m, d, annee or (m.classe.annee_academique if m.classe else None))]
             if statut == "annuler":
-                SeanceRealisee.objects.filter(emploi=e, date=d).delete()
+                SeanceRealisee.objects.filter(emploi__in=groupe, date=d).delete()
                 ok += 1
                 continue
             if statut not in (SeanceRealisee.EFFECTUEE, SeanceRealisee.NON_EFFECTUEE):
@@ -178,16 +188,17 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
                 if duree <= 0 or duree > 24 * 60:
                     erreurs.append(f"{label} : durée invalide.")
                     continue
-            SeanceRealisee.objects.update_or_create(
-                emploi=e, date=d,
-                defaults={
-                    "statut": statut, "formateur_id": e.formateur_id, "module_id": e.module_id, "classe_id": e.classe_id,
-                    "heure_debut": e.heure_debut, "heure_fin": e.heure_fin,
-                    "duree_minutes": duree if statut == SeanceRealisee.EFFECTUEE else 0,
-                    "commentaire": str(it.get("commentaire") or "")[:2000],
-                    "valide_par": request.user if request.user.is_authenticated else None,
-                },
-            )
+            for m in groupe:
+                SeanceRealisee.objects.update_or_create(
+                    emploi=m, date=d,
+                    defaults={
+                        "statut": statut, "formateur_id": m.formateur_id, "module_id": m.module_id, "classe_id": m.classe_id,
+                        "heure_debut": m.heure_debut, "heure_fin": m.heure_fin,
+                        "duree_minutes": duree if statut == SeanceRealisee.EFFECTUEE else 0,
+                        "commentaire": str(it.get("commentaire") or "")[:2000],
+                        "valide_par": request.user if request.user.is_authenticated else None,
+                    },
+                )
             ok += 1
         return Response({"traitees": ok, "erreurs": erreurs}, status=200 if ok else 400)
 
@@ -221,14 +232,70 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
-    def perform_create(self, serializer):
+    # ------------------------------------------------------------------
+    # Création / modification avec tronc commun
+    # ------------------------------------------------------------------
+    def _enregistrer(self, serializer):
+        from django.db import transaction
+        from .tronc_commun import nouvel_identifiant, synchroniser
+
+        classes = serializer.validated_data.pop("classes_tronc_commun", None)
+        inst = serializer.instance
+        classe = serializer.validated_data.get("classe", getattr(inst, "classe", None))
+        autres = [int(c) for c in (classes or []) if c and (not classe or int(c) != classe.pk)]
+        a_rattacher = getattr(serializer, "_a_rattacher", None) or []
         try:
-            serializer.save()
+            with transaction.atomic():
+                kwargs = {}
+                groupe = getattr(inst, "tronc_commun", None)
+                if autres and not groupe:
+                    groupe = nouvel_identifiant()
+                    kwargs["tronc_commun"] = groupe
+                if a_rattacher and groupe:
+                    EmploiDuTemps.objects.filter(pk__in=a_rattacher).update(tronc_commun=groupe)
+                obj = serializer.save(**kwargs)
+                if classes is not None or obj.tronc_commun:
+                    self.resultat_tronc_commun = synchroniser(obj, autres if classes is not None else None)
         except DjangoValidationError as e:
             raise serializers.ValidationError({"non_field_errors": e.messages})
 
+    def perform_create(self, serializer):
+        self._enregistrer(serializer)
+
     def perform_update(self, serializer):
-        try:
-            serializer.save()
-        except DjangoValidationError as e:
-            raise serializers.ValidationError({"non_field_errors": e.messages})
+        self._enregistrer(serializer)
+
+    def destroy(self, request, *args, **kwargs):
+        """?tout_le_tronc_commun=1 : supprime le créneau pour toutes les classes du tronc commun."""
+        from django.db import transaction
+        obj = self.get_object()
+        tout = str(request.query_params.get("tout_le_tronc_commun", "")).lower() in ("1", "true", "oui")
+        with transaction.atomic():
+            if tout and obj.tronc_commun:
+                nb = EmploiDuTemps.objects.filter(tronc_commun=obj.tronc_commun).delete()[0]
+            else:
+                obj.delete()
+                nb = 1
+        return Response({"supprimes": nb}, status=200)
+
+    @action(detail=False, methods=["get"], url_path="tronc-commun/classes")
+    def tronc_commun_classes(self, request):
+        """Classes pouvant suivre le cours en tronc commun.
+
+        ?module=&classe=&jour=&heure_debut=HH:MM&heure_fin=HH:MM&date_debut=&date_fin=&emploi=<id en modification>
+        """
+        from django.utils.dateparse import parse_time
+        from academique.models import Classe
+        from .tronc_commun import classes_candidates
+
+        p = request.query_params
+        if not p.get("module"):
+            return Response({"detail": "Le cours est requis."}, status=400)
+        classe = Classe.objects.filter(pk=p.get("classe")).first() if p.get("classe") else None
+        emploi = EmploiDuTemps.objects.filter(pk=p.get("emploi")).first() if p.get("emploi") else None
+        hd = parse_time(p.get("heure_debut") or "") if p.get("heure_debut") else None
+        hf = parse_time(p.get("heure_fin") or "") if p.get("heure_fin") else None
+        return Response({"classes": classes_candidates(
+            int(p["module"]), classe, p.get("jour"), hd, hf,
+            self._parse_date(p.get("date_debut")), self._parse_date(p.get("date_fin")), emploi,
+        )})
