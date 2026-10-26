@@ -3,7 +3,36 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import CustomUser, Role
 
 
+CHAMPS_DROITS = ("can_manage_rh", "can_manage_pedagogie", "can_manage_logistique", "can_manage_finance", "can_manage_etudiants")
+
+
+def niveau_acces(valeur):
+    """Normalise un droit : booléen / ancien format → « none », « lecture » ou « ecriture »."""
+    if isinstance(valeur, bool):
+        return "ecriture" if valeur else "none"
+    v = str(valeur if valeur is not None else "").strip().lower()
+    if v in ("ecriture", "écriture", "write", "true", "1", "oui"):
+        return "ecriture"
+    if v in ("lecture", "read"):
+        return "lecture"
+    return "none"
+
+
 class RoleSerializer(serializers.ModelSerializer):
+    def to_internal_value(self, data):
+        data = data.copy() if hasattr(data, "copy") else dict(data)
+        for champ in CHAMPS_DROITS:
+            if champ in data:
+                data[champ] = niveau_acces(data[champ])
+        return super().to_internal_value(data)
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        for champ in CHAMPS_DROITS:
+            if champ in rep:
+                rep[champ] = niveau_acces(rep[champ])
+        return rep
+
     class Meta:
         model = Role
         fields = [
