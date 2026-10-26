@@ -499,6 +499,20 @@ class FormateurPortalViewSet(viewsets.ViewSet):
             except Exception as e:
                 errors.append(str(e))
 
+        if created_count or updated_count:
+            try:
+                from notifications.services import notifier
+                modules = {str(i.get('module_id')) for i in notes_data}
+                noms = ", ".join(sorted(ModuleModel.objects.filter(pk__in=[m for m in modules if m and m != 'None']).values_list('nom', flat=True)))
+                notifier(
+                    ["pedagogie"], "notes_saisies",
+                    f"Notes saisies par {formateur.nom}",
+                    f"{created_count + updated_count} note(s) enregistrée(s){f' — {noms}' if noms else ''}",
+                    lien="/grades",
+                )
+            except Exception:
+                pass
+
         return Response({
             'created': created_count,
             'updated': updated_count,
