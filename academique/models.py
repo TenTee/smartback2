@@ -273,6 +273,36 @@ class Classe(NamedDescriptionModel):
     )
     modules = models.ManyToManyField(Module, related_name="classes_academique", blank=True)
     nom = models.CharField(max_length=255, blank=True)
+    # Pause propre à la classe (sinon celle du type de cycle). Personnalisée sans heures = pas de pause.
+    pause_personnalisee = models.BooleanField(default=False)
+    heure_pause_debut = models.TimeField(null=True, blank=True)
+    heure_pause_fin = models.TimeField(null=True, blank=True)
+
+    def horaires(self):
+        """Horaires effectifs : journée (type de cycle) et pause (classe, sinon cycle, sinon 12h-13h)."""
+        import datetime
+
+        from django.utils.dateparse import parse_time
+
+        def t(v):
+            return parse_time(v) if isinstance(v, str) else v
+
+        cg = self.cycle.type_cycle if self.cycle_id and self.cycle.type_cycle_id else None
+        if self.pause_personnalisee:
+            debut, fin, source = t(self.heure_pause_debut), t(self.heure_pause_fin), "classe"
+        elif cg:
+            debut, fin, source = t(cg.heure_pause_debut), t(cg.heure_pause_fin), "cycle"
+        else:
+            debut, fin, source = datetime.time(12, 0), datetime.time(13, 0), "defaut"
+        if not debut or not fin or fin <= debut:
+            debut = fin = None
+        return {
+            "pause_debut": debut, "pause_fin": fin, "pause_source": source,
+            "debut_journee": t(cg.heure_debut_journee) if cg else None,
+            "fin_journee": t(cg.heure_fin_journee) if cg else None,
+            "cycle_pause_debut": t(cg.heure_pause_debut) if cg else datetime.time(12, 0),
+            "cycle_pause_fin": t(cg.heure_pause_fin) if cg else datetime.time(13, 0),
+        }
 
     class Meta:
         ordering = ["annee_academique__libelle", "nom"]

@@ -404,6 +404,10 @@ class ClasseSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "modules",
+            "pause_personnalisee",
+            "heure_pause_debut",
+            "heure_pause_fin",
+            "horaires",
             "created_at",
             "updated_at",
         ]
@@ -418,6 +422,25 @@ class ClasseSerializer(serializers.ModelSerializer):
             "niveau_nom",
             "annee_academique_libelle",
         ]
+
+    horaires = serializers.SerializerMethodField()
+
+    def get_horaires(self, obj):
+        h = obj.horaires()
+        return {k: (v.strftime("%H:%M") if hasattr(v, "strftime") else v) for k, v in h.items()}
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        inst = self.instance
+        perso = attrs.get("pause_personnalisee", getattr(inst, "pause_personnalisee", False))
+        debut = attrs.get("heure_pause_debut", getattr(inst, "heure_pause_debut", None))
+        fin = attrs.get("heure_pause_fin", getattr(inst, "heure_pause_fin", None))
+        if perso and (debut or fin):
+            if not (debut and fin):
+                raise serializers.ValidationError({"heure_pause_fin": ["Indiquez le début et la fin de la pause (ou aucune heure pour « pas de pause »)."]})
+            if fin <= debut:
+                raise serializers.ValidationError({"heure_pause_fin": ["La fin de la pause doit être après son début."]})
+        return attrs
 
 
 class SemestreSerializer(serializers.ModelSerializer):

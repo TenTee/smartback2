@@ -83,24 +83,11 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
                 date_debut, date_fin, sauf_pk=getattr(inst, "pk", None),
             ).values_list("pk", flat=True))
 
-        # 1️⃣ Bloquer la pause par cycle
-        classe = data.get("classe")
-        if classe and classe.cycle and classe.cycle.type_cycle:
-            cg = classe.cycle.type_cycle
-            pause_debut = cg.heure_pause_debut
-            pause_fin = cg.heure_pause_fin
-            
-            if data["heure_debut"] < pause_fin and data["heure_fin"] > pause_debut:
-                raise serializers.ValidationError({
-                    "non_field_errors": [f"⏸️ Impossible de programmer une séance pendant la pause ({pause_debut.strftime('%H:%M')}–{pause_fin.strftime('%H:%M')})."]
-                })
-        else:
-            pause_debut = time(12, 0)
-            pause_fin = time(13, 0)
-            if data["heure_debut"] < pause_fin and data["heure_fin"] > pause_debut:
-                raise serializers.ValidationError({
-                    "non_field_errors": ["⏸️ Impossible de programmer une séance pendant la pause déjeuner (12h00–13h00)."]
-                })
+        # 1️⃣ Pause de la classe (ou du cycle)
+        from .horaires import erreur_horaires
+        erreur = erreur_horaires(data.get("classe") or getattr(inst, "classe", None), data["heure_debut"], data["heure_fin"], verifier_journee=False)
+        if erreur:
+            raise serializers.ValidationError({"non_field_errors": [erreur]})
 
         # 2️⃣ Empêcher conflits de salle (hors tronc communs du même module)
         conflits_salle = EmploiDuTemps.objects.filter(periode).filter(

@@ -79,26 +79,11 @@ class EmploiDuTemps(models.Model):
             if self.niveau_id and self.classe.niveau_id != self.niveau_id:
                 raise ValidationError("La classe fournie n'appartient pas au niveau sélectionné.")
 
-        # 1️⃣ Bloquer la pause par cycle
-        if self.classe_id and self.classe.cycle and self.classe.cycle.type_cycle:
-            cg = self.classe.cycle.type_cycle
-            pause_debut = cg.heure_pause_debut
-            pause_fin = cg.heure_pause_fin
-            
-            if self.heure_debut < pause_fin and self.heure_fin > pause_debut:
-                raise ValidationError(f"⏸️ Impossible de programmer une séance pendant la pause ({pause_debut.strftime('%H:%M')}–{pause_fin.strftime('%H:%M')}).")
-            
-            # 1.1 Bloquer hors horaires journée
-            debut_j = cg.heure_debut_journee
-            fin_j = cg.heure_fin_journee
-            if self.heure_debut < debut_j or self.heure_fin > fin_j:
-                raise ValidationError(f"🕒 Hors créneau autorisé pour ce cycle ({debut_j.strftime('%H:%M')}–{fin_j.strftime('%H:%M')}).")
-        else:
-            # Fallback for old records or missing cycle info
-            pause_debut = time(12, 0)
-            pause_fin = time(13, 0)
-            if self.heure_debut < pause_fin and self.heure_fin > pause_debut:
-                raise ValidationError("⏸️ Impossible de programmer une séance pendant la pause déjeuner (12h00–13h00).")
+        # 1️⃣ Pause de la classe (ou du cycle) et amplitude de la journée
+        from .horaires import erreur_horaires
+        erreur = erreur_horaires(self.classe if self.classe_id else None, self.heure_debut, self.heure_fin)
+        if erreur:
+            raise ValidationError(erreur)
 
         # 2️⃣ Empêcher conflits de salle (hors classes du même tronc commun)
         conflits_salle = self._hors_groupe(EmploiDuTemps.objects.filter(periode).filter(
