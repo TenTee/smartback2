@@ -32,7 +32,10 @@ class EtudiantListCreateView(generics.ListCreateAPIView):
         # Filtre global par année académique (via le header X-Academic-Year)
         year_id = get_current_academic_year_id()
         if year_id:
-            queryset = queryset.filter(inscriptions__annee_academique_ref_id=year_id)
+            # Étudiants inscrits cette année + dossiers encore sans aucune inscription (sinon invisibles)
+            queryset = queryset.filter(
+                Q(inscriptions__annee_academique_ref_id=year_id) | Q(inscriptions__isnull=True)
+            )
 
         # Récupération des paramètres GET
         filiere_id = self.request.query_params.get("filiere")

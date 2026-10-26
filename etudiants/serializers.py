@@ -137,7 +137,11 @@ class EtudiantSerializer(serializers.ModelSerializer):
         elif niveau_id:
             try:
                 niveau = Niveau.objects.get(pk=niveau_id)
-                annee = AnneeAcademique.objects.filter(est_active=True).first()
+                # Année choisie dans le formulaire, sinon celle sélectionnée dans l'en-tête, sinon l'année active
+                from academique.middleware import get_current_academic_year_id
+                annee_id = annee_academique_ref_id or get_current_academic_year_id()
+                annee = (AnneeAcademique.objects.filter(pk=annee_id).first() if annee_id else None) \
+                    or AnneeAcademique.objects.filter(est_active=True).first()
                 Inscription.objects.create(
                     etudiant=etudiant,
                     niveau=niveau,
