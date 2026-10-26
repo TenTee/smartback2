@@ -407,6 +407,9 @@ class ClasseSerializer(serializers.ModelSerializer):
             "pause_personnalisee",
             "heure_pause_debut",
             "heure_pause_fin",
+            "journee_personnalisee",
+            "heure_debut_journee",
+            "heure_fin_journee",
             "horaires",
             "created_at",
             "updated_at",
@@ -440,6 +443,11 @@ class ClasseSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"heure_pause_fin": ["Indiquez le début et la fin de la pause (ou aucune heure pour « pas de pause »)."]})
             if fin <= debut:
                 raise serializers.ValidationError({"heure_pause_fin": ["La fin de la pause doit être après son début."]})
+        if attrs.get("journee_personnalisee", getattr(inst, "journee_personnalisee", False)):
+            dj = attrs.get("heure_debut_journee", getattr(inst, "heure_debut_journee", None))
+            fj = attrs.get("heure_fin_journee", getattr(inst, "heure_fin_journee", None))
+            if not (dj and fj) or fj <= dj:
+                raise serializers.ValidationError({"heure_fin_journee": ["Indiquez un début et une fin de journée valides."]})
         return attrs
 
 

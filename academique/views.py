@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import openpyxl
 from django.db import transaction
+from django.db.models import Q
 from django.http import HttpResponse, FileResponse
 from django.conf import settings
 import os
@@ -310,58 +311,93 @@ class ClasseViewSet(OptimizedModelViewSet):
     )
     ordering = ("annee_academique__libelle", "nom")
 
-    @action(detail=True, methods=["get", "put", "patch"], url_path="pause")
-    def pause(self, request, pk=None):
-        """Pause de la classe.
+    @action(detail=True, methods=["get", "put", "patch"], url_path="horaires")
+    def horaires(self, request, pk=None):
+        """Horaires de la classe : journée et pause.
 
-        PUT {"mode": "cycle"}                                   → pause du type de cycle
-        PUT {"mode": "personnalisee", "debut": "HH:MM", "fin": "HH:MM"}
-        PUT {"mode": "aucune"}                                  → pas de pause
-        Réponse : horaires effectifs + créneaux déjà programmés qui tombent pendant la nouvelle pause.
+        PUT {
+          "journee_mode": "cycle" | "personnalisee", "journee_debut": "HH:MM", "journee_fin": "HH:MM",
+          "mode": "cycle" | "personnalisee" | "aucune", "debut": "HH:MM", "fin": "HH:MM"     (pause)
+        }  (chaque partie est facultative)
+        Réponse : horaires effectifs + cours déjà programmés qui ne respectent plus ces horaires.
         """
         from django.utils.dateparse import parse_time
         from emploidutemps.models import periode_q
 
         classe = self.get_object()
         if request.method in ("PUT", "PATCH"):
-            mode = request.data.get("mode")
+            d = request.data
+            champs = []
+            mode = d.get("mode")
             if mode == "cycle":
                 classe.pause_personnalisee, classe.heure_pause_debut, classe.heure_pause_fin = False, None, None
             elif mode == "aucune":
                 classe.pause_personnalisee, classe.heure_pause_debut, classe.heure_pause_fin = True, None, None
             elif mode == "personnalisee":
-                debut = parse_time(str(request.data.get("debut") or ""))
-                fin = parse_time(str(request.data.get("fin") or ""))
+                debut, fin = parse_time(str(d.get("debut") or "")), parse_time(str(d.get("fin") or ""))
                 if not debut or not fin:
                     return Response({"detail": "Indiquez l'heure de début et de fin de la pause."}, status=400)
                 if fin <= debut:
                     return Response({"detail": "La fin de la pause doit être après son début."}, status=400)
                 classe.pause_personnalisee, classe.heure_pause_debut, classe.heure_pause_fin = True, debut, fin
-            else:
-                return Response({"detail": "Mode inconnu (cycle, personnalisee ou aucune)."}, status=400)
-            classe.save(update_fields=["pause_personnalisee", "heure_pause_debut", "heure_pause_fin", "updated_at"])
+            elif mode:
+                return Response({"detail": "Mode de pause inconnu (cycle, personnalisee ou aucune)."}, status=400)
+            if mode:
+                champs += ["pause_personnalisee", "heure_pause_debut", "heure_pause_fin"]
+
+            jmode = d.get("journee_mode")
+            if jmode == "cycle":
+                classe.journee_personnalisee, classe.heure_debut_journee, classe.heure_fin_journee = False, None, None
+            elif jmode == "personnalisee":
+                dj, fj = parse_time(str(d.get("journee_debut") or "")), parse_time(str(d.get("journee_fin") or ""))
+                if not dj or not fj:
+                    return Response({"detail": "Indiquez l'heure de début et de fin de la journée."}, status=400)
+                if fj <= dj:
+                    return Response({"detail": "La fin de la journée doit être après son début."}, status=400)
+                classe.journee_personnalisee, classe.heure_debut_journee, classe.heure_fin_journee = True, dj, fj
+            elif jmode:
+                return Response({"detail": "Mode de journée inconnu (cycle ou personnalisee)."}, status=400)
+            if jmode:
+                champs += ["journee_personnalisee", "heure_debut_journee", "heure_fin_journee"]
+
+            if champs:
+                classe.save(update_fields=champs + ["updated_at"])
 
         h = classe.horaires()
         conflits = []
+        q = None
         if h["pause_debut"] and h["pause_fin"]:
-            aujourd_hui = timezone.localdate()
-            qs = EmploiDuTemps.objects.filter(periode_q(aujourd_hui, None)).filter(
-                classe=classe, heure_debut__lt=h["pause_fin"], heure_fin__gt=h["pause_debut"],
-            ).select_related("module").order_by("date_debut", "jour", "heure_debut")
-            conflits = [{
-                "id": e.id, "jour": e.jour, "module": e.module.nom,
-                "horaire": f"{e.heure_debut:%H:%M}-{e.heure_fin:%H:%M}",
-                "periode": f"{e.date_debut:%d/%m/%Y} – {e.date_fin:%d/%m/%Y}" if e.date_debut and e.date_fin else "permanent",
-            } for e in qs[:50]]
+            q = Q(heure_debut__lt=h["pause_fin"], heure_fin__gt=h["pause_debut"])
+        if h["debut_journee"] and h["fin_journee"]:
+            hors = Q(heure_debut__lt=h["debut_journee"]) | Q(heure_fin__gt=h["fin_journee"])
+            q = hors if q is None else (q | hors)
+        if q is not None:
+            qs = EmploiDuTemps.objects.filter(periode_q(timezone.localdate(), None)).filter(classe=classe).filter(q)
+            for e in qs.select_related("module").order_by("date_debut", "jour", "heure_debut")[:50]:
+                pendant_pause = bool(h["pause_debut"] and e.heure_debut < h["pause_fin"] and e.heure_fin > h["pause_debut"])
+                conflits.append({
+                    "id": e.id, "jour": e.jour, "module": e.module.nom,
+                    "horaire": f"{e.heure_debut:%H:%M}-{e.heure_fin:%H:%M}",
+                    "motif": "pendant la pause" if pendant_pause else "hors de la journée",
+                    "periode": f"{e.date_debut:%d/%m/%Y} – {e.date_fin:%d/%m/%Y}" if e.date_debut and e.date_fin else "permanent",
+                })
         fmt = lambda v: v.strftime("%H:%M") if v else None  # noqa: E731
         return Response({
             "classe": classe.id,
             "mode": "cycle" if not classe.pause_personnalisee else ("personnalisee" if h["pause_debut"] else "aucune"),
             "pause_debut": fmt(h["pause_debut"]), "pause_fin": fmt(h["pause_fin"]), "pause_source": h["pause_source"],
             "cycle_pause_debut": fmt(h["cycle_pause_debut"]), "cycle_pause_fin": fmt(h["cycle_pause_fin"]),
-            "debut_journee": fmt(h["debut_journee"]), "fin_journee": fmt(h["fin_journee"]),
-            "creneaux_pendant_la_pause": conflits,
+            "journee_mode": "personnalisee" if h["journee_source"] == "classe" else "cycle",
+            "debut_journee": fmt(h["debut_journee"]), "fin_journee": fmt(h["fin_journee"]), "journee_source": h["journee_source"],
+            "cycle_debut_journee": fmt(h["cycle_debut_journee"]), "cycle_fin_journee": fmt(h["cycle_fin_journee"]),
+            "creneaux_hors_horaires": conflits,
+            "creneaux_pendant_la_pause": [c for c in conflits if c["motif"] == "pendant la pause"],
         })
+
+    @action(detail=True, methods=["get", "put", "patch"], url_path="pause")
+    def pause(self, request, pk=None):
+        """Ancienne route (pause seule) : voir `horaires`."""
+        return self.horaires(request, pk)
 
 
 class SemestreViewSet(OptimizedModelViewSet):

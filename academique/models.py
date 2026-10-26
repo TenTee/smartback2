@@ -277,6 +277,10 @@ class Classe(NamedDescriptionModel):
     pause_personnalisee = models.BooleanField(default=False)
     heure_pause_debut = models.TimeField(null=True, blank=True)
     heure_pause_fin = models.TimeField(null=True, blank=True)
+    # Début / fin de journée propres à la classe (sinon ceux du type de cycle)
+    journee_personnalisee = models.BooleanField(default=False)
+    heure_debut_journee = models.TimeField(null=True, blank=True)
+    heure_fin_journee = models.TimeField(null=True, blank=True)
 
     def horaires(self):
         """Horaires effectifs : journée (type de cycle) et pause (classe, sinon cycle, sinon 12h-13h)."""
@@ -296,10 +300,17 @@ class Classe(NamedDescriptionModel):
             debut, fin, source = datetime.time(12, 0), datetime.time(13, 0), "defaut"
         if not debut or not fin or fin <= debut:
             debut = fin = None
+        cycle_debut_j = t(cg.heure_debut_journee) if cg else None
+        cycle_fin_j = t(cg.heure_fin_journee) if cg else None
+        if self.journee_personnalisee and self.heure_debut_journee and self.heure_fin_journee:
+            debut_j, fin_j, source_j = t(self.heure_debut_journee), t(self.heure_fin_journee), "classe"
+        else:
+            debut_j, fin_j, source_j = cycle_debut_j, cycle_fin_j, ("cycle" if cg else "defaut")
         return {
             "pause_debut": debut, "pause_fin": fin, "pause_source": source,
-            "debut_journee": t(cg.heure_debut_journee) if cg else None,
-            "fin_journee": t(cg.heure_fin_journee) if cg else None,
+            "debut_journee": debut_j, "fin_journee": fin_j, "journee_source": source_j,
+            "cycle_debut_journee": cycle_debut_j or datetime.time(8, 0),
+            "cycle_fin_journee": cycle_fin_j or datetime.time(18, 0),
             "cycle_pause_debut": t(cg.heure_pause_debut) if cg else datetime.time(12, 0),
             "cycle_pause_fin": t(cg.heure_pause_fin) if cg else datetime.time(13, 0),
         }

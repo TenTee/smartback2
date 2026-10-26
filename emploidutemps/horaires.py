@@ -19,5 +19,6 @@ def erreur_horaires(classe, heure_debut, heure_fin, verifier_journee=True):
         return f"⏸️ Impossible de programmer une séance pendant la pause{origine} ({_hm(pd)}–{_hm(pf)})."
     if verifier_journee and h["debut_journee"] and h["fin_journee"]:
         if heure_debut < h["debut_journee"] or heure_fin > h["fin_journee"]:
-            return f"🕒 Hors créneau autorisé pour ce cycle ({_hm(h['debut_journee'])}–{_hm(h['fin_journee'])})."
+            qui = "cette classe" if h.get("journee_source") == "classe" else "ce cycle"
+            return f"🕒 Hors de la journée de {qui} ({_hm(h['debut_journee'])}–{_hm(h['fin_journee'])})."
     return None
