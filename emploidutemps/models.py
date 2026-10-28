@@ -219,7 +219,10 @@ class ActiviteClasse(models.Model):
     titre = models.CharField(max_length=200)
     type = models.CharField(max_length=20, choices=TYPES, default="autre")
     description = models.TextField(blank=True, default="")
-    classes = models.ManyToManyField("academique.Classe", related_name="activites")
+    classes = models.ManyToManyField("academique.Classe", related_name="activites", blank=True)
+    # Toutes les classes de l'année (y compris celles créées après l'activité)
+    toutes_les_classes = models.BooleanField(default=False)
+    annee_academique = models.ForeignKey("academique.AnneeAcademique", on_delete=models.CASCADE, null=True, blank=True, related_name="activites")
     recurrente = models.BooleanField(default=False)
     jour = models.CharField(max_length=20)
     date_debut = models.DateField()
@@ -248,6 +251,12 @@ class ActiviteClasse(models.Model):
     @property
     def couleur(self):
         return self.COULEURS.get(self.type, "#6D4C41")
+
+    def classes_effectives(self):
+        from academique.models import Classe
+        if self.toutes_les_classes:
+            return Classe.objects.filter(annee_academique_id=self.annee_academique_id) if self.annee_academique_id else Classe.objects.none()
+        return self.classes.all()
 
     def plage(self):
         """Heures occupées (journée entière = toute la journée)."""

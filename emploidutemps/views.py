@@ -337,7 +337,9 @@ class ActiviteClasseViewSet(viewsets.ModelViewSet):
         qs = ActiviteClasse.objects.prefetch_related("classes").select_related("salle", "formateur", "module")
         p = self.request.query_params
         if p.get("classe"):
-            qs = qs.filter(classes__id=p["classe"])
+            from academique.models import Classe
+            annee = Classe.objects.filter(pk=p["classe"]).values_list("annee_academique_id", flat=True).first()
+            qs = qs.filter(Q(classes__id=p["classe"]) | Q(toutes_les_classes=True, annee_academique_id=annee))
         if p.get("type"):
             qs = qs.filter(type=p["type"])
         dd, df = self._parse_date(p.get("date_debut")), self._parse_date(p.get("date_fin"))
@@ -355,13 +357,19 @@ class ActiviteClasseViewSet(viewsets.ModelViewSet):
         user = self.request.user
         p = profil(user)
         if p == "etudiant":
-            classes = user.etudiant_profile.inscriptions.exclude(classe__isnull=True).values_list("classe_id", flat=True)
-            return ActiviteClasse.objects.filter(classes__in=list(classes))
+            ins = user.etudiant_profile.inscriptions.exclude(classe__isnull=True)
+            classes = list(ins.values_list("classe_id", flat=True))
+            annees = list(ins.values_list("classe__annee_academique_id", flat=True))
+            return ActiviteClasse.objects.filter(Q(classes__in=classes) | Q(toutes_les_classes=True, annee_academique_id__in=annees))
         if p == "formateur":
             from messagerie.acces import paires_formateur
             f = user.formateur_profile
             classes = {c for c, _m in paires_formateur(f)}
-            return ActiviteClasse.objects.filter(Q(formateur=f) | Q(classes__in=list(classes)))
+            from academique.models import Classe
+            annees = set(Classe.objects.filter(pk__in=classes).values_list("annee_academique_id", flat=True))
+            return ActiviteClasse.objects.filter(
+                Q(formateur=f) | Q(classes__in=list(classes)) | Q(toutes_les_classes=True, annee_academique_id__in=annees)
+            )
         return ActiviteClasse.objects.all()
 
     def perform_create(self, serializer):

@@ -33,7 +33,9 @@ def activites_en_conflit(jour, hd, hf, date_debut, date_fin, classes_ids=(), sal
         qs = qs.filter(date_fin__gte=date_debut)
     qui = Q(pk__in=[])
     if classes_ids:
-        qui |= Q(classes__in=list(classes_ids))
+        from academique.models import Classe
+        annees = set(Classe.objects.filter(pk__in=list(classes_ids)).values_list("annee_academique_id", flat=True))
+        qui |= Q(classes__in=list(classes_ids)) | Q(toutes_les_classes=True, annee_academique_id__in=annees)
     if salle_id:
         qui |= Q(salle_id=salle_id)
     if formateur_id:
@@ -110,7 +112,7 @@ def occurrences(qs, debut, fin):
     """Occurrences datées des activités entre debut et fin (inclus)."""
     res = []
     for a in qs.prefetch_related("classes__cycle__type_cycle").select_related("salle", "formateur", "module"):
-        classes = list(a.classes.all())
+        classes = list(a.classes_effectives().select_related("cycle__type_cycle")) if a.toutes_les_classes else list(a.classes.all())
         wd = JOUR_INDEX.get(str(a.jour).strip().lower())
         if wd is None:
             continue
@@ -140,7 +142,9 @@ def occurrences(qs, debut, fin):
                 "salle_nom": a.salle.nom if a.salle_id else "",
                 "responsable": a.formateur.nom if a.formateur_id else a.responsable,
                 "module_nom": a.module.nom if a.module_id else "",
-                "classes": [{"id": c.id, "nom": c.nom} for c in classes],
+                "toutes_les_classes": a.toutes_les_classes,
+                "annee_academique": a.annee_academique_id,
+                "classes": [] if a.toutes_les_classes else [{"id": c.id, "nom": c.nom} for c in classes],
             })
             if not a.recurrente:
                 break
@@ -156,7 +160,7 @@ def notifier_activite(act, action="ajout"):
         from users.models import CustomUser
     except Exception:  # noqa: BLE001
         return
-    ids = list(act.classes.values_list("id", flat=True))
+    ids = list(act.classes_effectives().values_list("id", flat=True))
     etudiants = list(CustomUser.objects.filter(is_active=True, etudiant_profile__inscriptions__classe_id__in=ids).distinct())
     libelle = {"ajout": "Nouvelle activité", "modification": "Activité modifiée", "suppression": "Activité annulée"}[action]
     lieu = act.salle.nom if act.salle_id else act.lieu

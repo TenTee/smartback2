@@ -143,7 +143,7 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
 class ActiviteClasseSerializer(serializers.ModelSerializer):
     from academique.models import Classe as _Classe
 
-    classes = serializers.PrimaryKeyRelatedField(queryset=_Classe.objects.all(), many=True)
+    classes = serializers.PrimaryKeyRelatedField(queryset=_Classe.objects.all(), many=True, required=False)
     date = serializers.DateField(write_only=True, required=False, help_text="Activité ponctuelle : sa date")
     type_libelle = serializers.CharField(source="get_type_display", read_only=True)
     couleur = serializers.CharField(read_only=True)
@@ -158,14 +158,17 @@ class ActiviteClasseSerializer(serializers.ModelSerializer):
         model = _A
         fields = [
             "id", "titre", "type", "type_libelle", "couleur", "description", "classes", "classes_noms",
+            "toutes_les_classes", "annee_academique",
             "recurrente", "date", "jour", "date_debut", "date_fin", "journee_entiere", "heure_debut", "heure_fin",
             "salle", "salle_nom", "lieu", "formateur", "formateur_nom", "responsable", "module", "module_nom",
             "obligatoire", "quand", "cree_le", "modifie_le",
         ]
-        read_only_fields = ["jour", "cree_le", "modifie_le"]
+        read_only_fields = ["jour", "annee_academique", "cree_le", "modifie_le"]
         extra_kwargs = {"date_debut": {"required": False}, "date_fin": {"required": False}}
 
     def get_classes_noms(self, obj):
+        if obj.toutes_les_classes:
+            return ["Toutes les classes"]
         return [c.nom for c in obj.classes.all()]
 
     def get_quand(self, obj):
@@ -214,9 +217,30 @@ class ActiviteClasseSerializer(serializers.ModelSerializer):
             if hf <= hd:
                 raise serializers.ValidationError({"heure_fin": ["L'heure de fin doit être après l'heure de début."]})
 
-        classes = data.get("classes") if "classes" in data else (list(inst.classes.all()) if inst else [])
-        if not classes:
-            raise serializers.ValidationError({"classes": ["Choisissez au moins une classe."]})
+        toutes = get("toutes_les_classes", False)
+        if toutes:
+            # Année de l'activité : celle sélectionnée dans l'en-tête, sinon celle couvrant la date, sinon l'active
+            from academique.middleware import get_current_academic_year_id
+            from academique.models import AnneeAcademique, Classe
+            annee = None
+            annee_id = get_current_academic_year_id()
+            if annee_id:
+                annee = AnneeAcademique.objects.filter(pk=annee_id).first()
+            if annee is None or not (annee.date_debut <= dd <= annee.date_fin if annee.date_debut and annee.date_fin else True):
+                annee = AnneeAcademique.objects.filter(date_debut__lte=dd, date_fin__gte=dd).first() or annee \
+                    or AnneeAcademique.objects.filter(est_active=True).first()
+            if annee is None:
+                raise serializers.ValidationError({"toutes_les_classes": ["Aucune année académique ne couvre cette date."]})
+            data["annee_academique"] = annee
+            data["classes"] = []
+            classes = list(Classe.objects.filter(annee_academique=annee))
+            if not classes:
+                raise serializers.ValidationError({"toutes_les_classes": [f"Aucune classe pour l'année {annee.libelle}."]})
+        else:
+            data["annee_academique"] = None
+            classes = data.get("classes") if "classes" in data else (list(inst.classes.all()) if inst else [])
+            if not classes:
+                raise serializers.ValidationError({"classes": ["Choisissez au moins une classe (ou « toutes les classes »)."]})
 
         valeurs = {
             "jour": jour, "date_debut": dd, "date_fin": df, "journee_entiere": journee,
