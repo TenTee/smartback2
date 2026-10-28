@@ -138,3 +138,92 @@ class EmploiDuTempsSerializer(serializers.ModelSerializer):
                 })
 
         return data
+
+
+class ActiviteClasseSerializer(serializers.ModelSerializer):
+    from academique.models import Classe as _Classe
+
+    classes = serializers.PrimaryKeyRelatedField(queryset=_Classe.objects.all(), many=True)
+    date = serializers.DateField(write_only=True, required=False, help_text="Activité ponctuelle : sa date")
+    type_libelle = serializers.CharField(source="get_type_display", read_only=True)
+    couleur = serializers.CharField(read_only=True)
+    classes_noms = serializers.SerializerMethodField()
+    salle_nom = serializers.CharField(source="salle.nom", read_only=True)
+    formateur_nom = serializers.CharField(source="formateur.nom", read_only=True)
+    module_nom = serializers.CharField(source="module.nom", read_only=True)
+    quand = serializers.SerializerMethodField()
+
+    class Meta:
+        from .models import ActiviteClasse as _A
+        model = _A
+        fields = [
+            "id", "titre", "type", "type_libelle", "couleur", "description", "classes", "classes_noms",
+            "recurrente", "date", "jour", "date_debut", "date_fin", "journee_entiere", "heure_debut", "heure_fin",
+            "salle", "salle_nom", "lieu", "formateur", "formateur_nom", "responsable", "module", "module_nom",
+            "obligatoire", "quand", "cree_le", "modifie_le",
+        ]
+        read_only_fields = ["jour", "cree_le", "modifie_le"]
+        extra_kwargs = {"date_debut": {"required": False}, "date_fin": {"required": False}}
+
+    def get_classes_noms(self, obj):
+        return [c.nom for c in obj.classes.all()]
+
+    def get_quand(self, obj):
+        from .activites import decrire_quand
+        return decrire_quand(obj)
+
+    def validate(self, data):
+        from .activites import JOURS_NOMS, JOUR_INDEX, conflits_activite
+
+        inst = self.instance
+        get = lambda k, d=None: data[k] if k in data else (getattr(inst, k, d) if inst else d)  # noqa: E731
+        recurrente = get("recurrente", False)
+        if not str(get("titre", "") or "").strip():
+            raise serializers.ValidationError({"titre": ["Le titre est requis."]})
+
+        # Dates et jour
+        if recurrente:
+            dd, df = get("date_debut"), get("date_fin")
+            jour = self.initial_data.get("jour") or getattr(inst, "jour", None)
+            if not jour and dd:
+                jour = JOURS_NOMS[dd.weekday()]
+            if not (dd and df):
+                raise serializers.ValidationError({"date_fin": ["Indiquez la période (début et fin) de l'activité récurrente."]})
+            if df < dd:
+                raise serializers.ValidationError({"date_fin": ["La fin de la période doit être après son début."]})
+            if str(jour).strip().lower() not in JOUR_INDEX:
+                raise serializers.ValidationError({"jour": ["Jour de la semaine invalide."]})
+            jour = JOURS_NOMS[JOUR_INDEX[str(jour).strip().lower()]]
+        else:
+            d = data.pop("date", None) or (get("date_debut") if inst else None)
+            if not d:
+                raise serializers.ValidationError({"date": ["Indiquez la date de l'activité."]})
+            dd = df = d
+            jour = JOURS_NOMS[d.weekday()]
+        data.update(date_debut=dd, date_fin=df, jour=jour)
+        data.pop("date", None)
+
+        # Horaires
+        journee = get("journee_entiere", False)
+        if journee:
+            data["heure_debut"] = data["heure_fin"] = None
+        else:
+            hd, hf = get("heure_debut"), get("heure_fin")
+            if not (hd and hf):
+                raise serializers.ValidationError({"heure_debut": ["Indiquez l'heure de début et de fin (ou « toute la journée »)."]})
+            if hf <= hd:
+                raise serializers.ValidationError({"heure_fin": ["L'heure de fin doit être après l'heure de début."]})
+
+        classes = data.get("classes") if "classes" in data else (list(inst.classes.all()) if inst else [])
+        if not classes:
+            raise serializers.ValidationError({"classes": ["Choisissez au moins une classe."]})
+
+        valeurs = {
+            "jour": jour, "date_debut": dd, "date_fin": df, "journee_entiere": journee,
+            "heure_debut": get("heure_debut"), "heure_fin": get("heure_fin"),
+            "salle": get("salle"), "formateur": get("formateur"),
+        }
+        conflits = conflits_activite(valeurs, [c.pk for c in classes], exclure_id=getattr(inst, "pk", None))
+        if conflits:
+            raise serializers.ValidationError({"non_field_errors": ["Créneau indisponible : " + c for c in conflits]})
+        return data

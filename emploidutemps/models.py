@@ -85,6 +85,13 @@ class EmploiDuTemps(models.Model):
         if erreur:
             raise ValidationError(erreur)
 
+        # 1.2 Activités hors cours de la classe (ou utilisant la salle / le formateur)
+        from .activites import message_conflit_cours
+        msg = message_conflit_cours(self.classe_id, self.jour, self.heure_debut, self.heure_fin, self.date_debut, self.date_fin,
+                                    self.salle_id, self.formateur_id)
+        if msg:
+            raise ValidationError(msg)
+
         # 2️⃣ Empêcher conflits de salle (hors classes du même tronc commun)
         conflits_salle = self._hors_groupe(EmploiDuTemps.objects.filter(periode).filter(
             jour=self.jour,
@@ -180,3 +187,70 @@ class SeanceRealisee(models.Model):
 
     def __str__(self):
         return f"{self.date} {self.module} ({self.get_statut_display()})"
+
+
+class ActiviteClasse(models.Model):
+    """Activité hors cours d'une ou plusieurs classes (sport, sortie, conférence, évaluation…).
+
+    Ponctuelle : date_debut = date_fin (le jour de la semaine est déduit).
+    Récurrente : chaque `jour` entre date_debut et date_fin.
+    Elle occupe l'emploi du temps des classes : aucun cours ne peut être programmé au même moment.
+    """
+
+    TYPES = [
+        ("sport", "Sport"),
+        ("culture", "Activité culturelle"),
+        ("club", "Club"),
+        ("sortie", "Sortie / excursion"),
+        ("visite", "Visite d'entreprise"),
+        ("conference", "Conférence"),
+        ("reunion", "Réunion"),
+        ("ceremonie", "Cérémonie"),
+        ("evaluation", "Évaluation / examen"),
+        ("devoir", "Devoir surveillé"),
+        ("autre", "Autre activité"),
+    ]
+    COULEURS = {
+        "sport": "#2E7D32", "culture": "#8E24AA", "club": "#00838F", "sortie": "#EF6C00", "visite": "#F57C00",
+        "conference": "#1565C0", "reunion": "#455A64", "ceremonie": "#AD1457", "evaluation": "#C62828",
+        "devoir": "#D84315", "autre": "#6D4C41",
+    }
+
+    titre = models.CharField(max_length=200)
+    type = models.CharField(max_length=20, choices=TYPES, default="autre")
+    description = models.TextField(blank=True, default="")
+    classes = models.ManyToManyField("academique.Classe", related_name="activites")
+    recurrente = models.BooleanField(default=False)
+    jour = models.CharField(max_length=20)
+    date_debut = models.DateField()
+    date_fin = models.DateField()
+    journee_entiere = models.BooleanField(default=False)
+    heure_debut = models.TimeField(null=True, blank=True)
+    heure_fin = models.TimeField(null=True, blank=True)
+    salle = models.ForeignKey(Salle, on_delete=models.SET_NULL, null=True, blank=True, related_name="activites")
+    lieu = models.CharField(max_length=200, blank=True, default="", help_text="Lieu hors établissement (sortie, visite…)")
+    formateur = models.ForeignKey(Formateur, on_delete=models.SET_NULL, null=True, blank=True, related_name="activites")
+    responsable = models.CharField(max_length=200, blank=True, default="", help_text="Responsable / intervenant (si ce n'est pas un formateur)")
+    module = models.ForeignKey(Module, on_delete=models.SET_NULL, null=True, blank=True, related_name="activites")
+    obligatoire = models.BooleanField(default=True)
+    cree_par = models.ForeignKey("users.CustomUser", on_delete=models.SET_NULL, null=True, blank=True, related_name="activites_creees")
+    cree_le = models.DateTimeField(auto_now_add=True)
+    modifie_le = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["date_debut", "heure_debut", "id"]
+        verbose_name = "Activité de classe"
+        verbose_name_plural = "Activités de classe"
+
+    def __str__(self):
+        return f"{self.titre} ({self.date_debut})"
+
+    @property
+    def couleur(self):
+        return self.COULEURS.get(self.type, "#6D4C41")
+
+    def plage(self):
+        """Heures occupées (journée entière = toute la journée)."""
+        if self.journee_entiere or not self.heure_debut or not self.heure_fin:
+            return time(0, 0), time(23, 59)
+        return self.heure_debut, self.heure_fin

@@ -4,8 +4,9 @@ from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
-from .models import EmploiDuTemps, Salle, SeanceRealisee, periode_q, semaine_de
-from .serializers import EmploiDuTempsSerializer, SalleSerializer
+from django.db.models import Q
+from .models import ActiviteClasse, EmploiDuTemps, Salle, SeanceRealisee, periode_q, semaine_de
+from .serializers import ActiviteClasseSerializer, EmploiDuTempsSerializer, SalleSerializer
 
 class SalleViewSet(viewsets.ModelViewSet):
     queryset = Salle.objects.all()
@@ -299,3 +300,97 @@ class EmploiDuTempsViewSet(viewsets.ModelViewSet):
             int(p["module"]), classe, p.get("jour"), hd, hf,
             self._parse_date(p.get("date_debut")), self._parse_date(p.get("date_fin")), emploi,
         )})
+
+
+
+class ActiviteClasseViewSet(viewsets.ModelViewSet):
+    """Activités hors cours des classes.
+
+    GET /api/activites/?classe=&type=&date_debut=&date_fin=
+    GET /api/activites/occurrences/?date_debut=&date_fin=&classe=      (ou ?date= : la semaine)
+    GET /api/activites/occurrences/?moi=1&date=                        (étudiant : sa classe ; formateur : ses classes)
+    Écriture réservée au personnel. Les étudiants et le formateur responsable sont notifiés.
+    """
+
+    serializer_class = ActiviteClasseSerializer
+    queryset = ActiviteClasse.objects.all()
+
+    def _personnel(self):
+        from notifications.services import profil
+        return profil(self.request.user) == "personnel"
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        from rest_framework.exceptions import PermissionDenied
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not self._personnel():
+            raise PermissionDenied("Seule l'administration peut gérer les activités.")
+
+    @staticmethod
+    def _parse_date(value):
+        from django.utils.dateparse import parse_date
+        try:
+            return parse_date(value) if value else None
+        except (TypeError, ValueError):
+            return None
+
+    def get_queryset(self):
+        qs = ActiviteClasse.objects.prefetch_related("classes").select_related("salle", "formateur", "module")
+        p = self.request.query_params
+        if p.get("classe"):
+            qs = qs.filter(classes__id=p["classe"])
+        if p.get("type"):
+            qs = qs.filter(type=p["type"])
+        dd, df = self._parse_date(p.get("date_debut")), self._parse_date(p.get("date_fin"))
+        if df:
+            qs = qs.filter(date_debut__lte=df)
+        if dd:
+            qs = qs.filter(date_fin__gte=dd)
+        if not self._personnel():
+            qs = qs.filter(pk__in=self._mes_activites().values("pk"))
+        return qs.distinct()
+
+    def _mes_activites(self):
+        """Étudiant : activités de ses classes ; formateur : dont il est responsable ou de ses classes."""
+        from notifications.services import profil
+        user = self.request.user
+        p = profil(user)
+        if p == "etudiant":
+            classes = user.etudiant_profile.inscriptions.exclude(classe__isnull=True).values_list("classe_id", flat=True)
+            return ActiviteClasse.objects.filter(classes__in=list(classes))
+        if p == "formateur":
+            from messagerie.acces import paires_formateur
+            f = user.formateur_profile
+            classes = {c for c, _m in paires_formateur(f)}
+            return ActiviteClasse.objects.filter(Q(formateur=f) | Q(classes__in=list(classes)))
+        return ActiviteClasse.objects.all()
+
+    def perform_create(self, serializer):
+        act = serializer.save(cree_par=self.request.user)
+        from .activites import notifier_activite
+        notifier_activite(act, "ajout")
+
+    def perform_update(self, serializer):
+        act = serializer.save()
+        from .activites import notifier_activite
+        notifier_activite(act, "modification")
+
+    def perform_destroy(self, instance):
+        from .activites import notifier_activite
+        notifier_activite(instance, "suppression")
+        instance.delete()
+
+    @action(detail=False, methods=["get"])
+    def occurrences(self, request):
+        from .activites import occurrences
+        p = request.query_params
+        dd, df = self._parse_date(p.get("date_debut")), self._parse_date(p.get("date_fin"))
+        jour = self._parse_date(p.get("date"))
+        if jour and not (dd or df):
+            dd, df = semaine_de(jour)
+        if not (dd and df):
+            from django.utils import timezone
+            dd, df = semaine_de(timezone.localdate())
+        qs = self.get_queryset().filter(date_debut__lte=df, date_fin__gte=dd)
+        if p.get("formateur"):
+            qs = qs.filter(formateur_id=p["formateur"])
+        return Response(occurrences(qs, dd, df))
