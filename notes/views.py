@@ -786,4 +786,13 @@ class NoteViewSet(viewsets.ModelViewSet):
             images["photo"] = file_to_data_url(photo_doc.fichier) if photo_doc else None
             response_data["images"] = images
 
+        # Inscription au registre des documents officiels (numéro + QR code de vérification)
+        if str(request.query_params.get("registre", "")).lower() in ("1", "true", "oui"):
+            try:
+                from attestations.services import enregistrer_releve
+                response_data["document"] = enregistrer_releve(etudiant, inscription, response_data, request.user)
+            except Exception:  # noqa: BLE001  — le relevé reste téléchargeable sans QR code
+                import logging
+                logging.getLogger(__name__).exception("Relevé non inscrit au registre")
+
         return Response(response_data)

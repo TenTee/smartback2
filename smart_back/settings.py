@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'assiduite',
     'notifications',
     'messagerie',
+    'attestations',
 ]
 
 # -------------------------
