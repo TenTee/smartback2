@@ -47,11 +47,12 @@ class UserViewSet(viewsets.ModelViewSet):
         data = {
             "id": u.id, "noms": u.noms, "prenoms": u.prenoms, "email": u.email,
             "username": u.username, "role": u.role, "is_superuser": u.is_superuser,
+            "mot_de_passe_a_changer": bool(getattr(u, "mot_de_passe_provisoire", None)) and not getattr(u, "mdp_modifie_par_utilisateur", False),
         }
         # Droits du rôle (menu de l'espace d'administration), toujours à jour
         from .serializers import CHAMPS_DROITS, niveau_acces
         role_obj = Role.objects.filter(code=u.role).first() if u.role else None
-        data["role_libelle"] = role_obj.libelle if role_obj else (u.role or "")
+        data["role_libelle"] = role_obj.libelle if role_obj else ("Super administrateur" if u.is_superuser else (u.role or ""))
         data["permissions"] = {
             c: ("ecriture" if u.is_superuser else niveau_acces(getattr(role_obj, c, "none") if role_obj else "none"))
             for c in CHAMPS_DROITS
