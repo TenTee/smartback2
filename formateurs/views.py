@@ -440,10 +440,10 @@ class FormateurPortalViewSet(viewsets.ViewSet):
                 'classe_id': note.classe.id if note.classe else None,
                 'classe_nom': str(note.classe) if note.classe else '',
                 'evaluation_id': note.evaluation.id if note.evaluation else None,
-                'note_cc': float(note.note_cc) if note.note_cc else None,
-                'note_sn': float(note.note_sn) if note.note_sn else None,
-                'note_rattrapage': float(note.note_rattrapage) if note.note_rattrapage else None,
-                'note_finale': float(note.note_finale) if note.note_finale else None,
+                'note_cc': float(note.note_cc) if note.note_cc is not None else None,
+                'note_sn': float(note.note_sn) if note.note_sn is not None else None,
+                'note_rattrapage': float(note.note_rattrapage) if note.note_rattrapage is not None else None,
+                'note_finale': float(note.note_finale) if note.note_finale is not None else None,
             })
 
         return Response(data)
@@ -480,17 +480,21 @@ class FormateurPortalViewSet(viewsets.ViewSet):
                 mod = ModuleModel.objects.get(pk=module_id)
                 session = mod.semestre or "Semestre 1"
 
+                # CC / SN calculées à partir d'évaluations partielles : non modifiables directement
+                from notes.partielles import composantes_calculees
+                calc = composantes_calculees(item.get('classe_id'), item['module_id'])
+                defaults = {'note_rattrapage': item.get('note_rattrapage')}
+                if not calc['cc']:
+                    defaults['note_cc'] = item.get('note_cc')
+                if not calc['sn']:
+                    defaults['note_sn'] = item.get('note_sn')
                 note, created = Note.objects.update_or_create(
                     etudiant_id=item['etudiant_id'],
                     module_id=item['module_id'],
                     classe_id=item.get('classe_id'),
                     evaluation_id=item.get('evaluation_id'),
                     session=session,
-                    defaults={
-                        'note_cc': item.get('note_cc'),
-                        'note_sn': item.get('note_sn'),
-                        'note_rattrapage': item.get('note_rattrapage'),
-                    }
+                    defaults=defaults,
                 )
                 if created:
                     created_count += 1

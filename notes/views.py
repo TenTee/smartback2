@@ -84,11 +84,14 @@ class NoteViewSet(viewsets.ModelViewSet):
         if session:
             notes = notes.filter(session=session)
 
-        notes = notes.select_related("module")
+        notes = list(notes.select_related("module"))
+        from .partielles import details_pour_etudiant
+        details = details_pour_etudiant(etudiant, notes)
 
         data = []
         for note in notes:
             data.append({
+                "details": details.get(note.id, {"cc": [], "sn": []}),
                 "id": note.id,
                 "module_nom": note.module.nom,
                 "session": note.session,

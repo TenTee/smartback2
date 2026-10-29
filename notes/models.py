@@ -94,6 +94,10 @@ class Note(models.Model):
             total = (float(self.note_cc) * pc) + (float(sn_or_r or 0) * psn)
 
             self.note_finale = round(total / 100.0, 2)
+        # update_or_create (Django ≥ 4.2) n'enregistre que les champs de « defaults » :
+        # on y ajoute les champs recalculés, sinon la note finale ne serait pas mise à jour.
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"note_finale", "annee_academique", "annee_academique_ref"}
         super().save(*args, **kwargs)
 
 
@@ -163,3 +167,37 @@ class Note(models.Model):
 
     def __str__(self):
         return f"{self.etudiant.nom} - {self.module.nom} ({self.session}) : {self.note_finale or '--'}"
+
+
+class EvaluationPartielle(models.Model):
+    """Évaluation saisie par le formateur (devoir, interrogation, TP, examen…) dont les notes sur 20
+    forment, par moyenne pondérée, la note de CC ou de SN de la classe pour un module."""
+
+    CC, SN = "cc", "sn"
+    COMPOSANTES = [(CC, "Contrôle continu (CC)"), (SN, "Session normale (SN)")]
+
+    classe = models.ForeignKey("academique.Classe", on_delete=models.CASCADE, related_name="evaluations_partielles")
+    module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="evaluations_partielles")
+    composante = models.CharField(max_length=2, choices=COMPOSANTES)
+    libelle = models.CharField(max_length=120)
+    coefficient = models.DecimalField(max_digits=4, decimal_places=2, default=1, validators=[MinValueValidator(0.01)])
+    date = models.DateField(null=True, blank=True)
+    ordre = models.PositiveIntegerField(default=0)
+    formateur = models.ForeignKey("formateurs.Formateur", on_delete=models.SET_NULL, null=True, blank=True, related_name="evaluations_partielles")
+    cree_le = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["composante", "ordre", "date", "id"]
+
+    def __str__(self):
+        return f"{self.libelle} ({self.get_composante_display()}) — {self.module} / {self.classe}"
+
+
+class NotePartielle(models.Model):
+    evaluation = models.ForeignKey(EvaluationPartielle, on_delete=models.CASCADE, related_name="notes")
+    etudiant = models.ForeignKey(Etudiant, on_delete=models.CASCADE, related_name="notes_partielles")
+    valeur = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(0), MaxValueValidator(20)])
+    modifie_le = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["evaluation", "etudiant"], name="unique_note_partielle")]
