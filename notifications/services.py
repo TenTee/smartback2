@@ -165,8 +165,47 @@ def notifier_utilisateurs(users, categorie, type, titre, message="", lien="", ni
 # ---------------------------------------------------------------------------
 # Web Push
 # ---------------------------------------------------------------------------
+def _generer_cles():
+    import base64
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    cle = ec.generate_private_key(ec.SECP256R1())
+    prive = cle.private_numbers().private_value.to_bytes(32, "big")
+    public = cle.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()  # noqa: E731
+    return b64(public), b64(prive)
+
+
+def cles_vapid():
+    """(clé publique, clé privée) : variables d'environnement si présentes, sinon clés créées
+    automatiquement et conservées en base au premier besoin. (None, None) si impossible."""
+    pub, priv = getattr(settings, "VAPID_PUBLIC_KEY", ""), getattr(settings, "VAPID_PRIVATE_KEY", "")
+    if pub and priv:
+        return pub, priv
+    from .models import ClesPush
+    c = ClesPush.objects.order_by("id").first()
+    if c is None:
+        try:
+            pub, priv = _generer_cles()
+        except Exception:  # noqa: BLE001  (module cryptography absent)
+            logger.warning("Impossible de créer les clés push : installez pywebpush (pip install pywebpush).")
+            return None, None
+        c = ClesPush.objects.create(cle_publique=pub, cle_privee=priv)
+    return c.cle_publique, c.cle_privee
+
+
+def envoi_disponible():
+    try:
+        import pywebpush  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def push_configure():
-    return bool(getattr(settings, "VAPID_PUBLIC_KEY", "") and getattr(settings, "VAPID_PRIVATE_KEY", ""))
+    return envoi_disponible() and bool(cles_vapid()[0])
 
 
 def _envoyer_push_async(user_ids, payload):
@@ -185,6 +224,9 @@ def envoyer_push(user_ids, payload):
     from .models import AbonnementPush
 
     envoyes = 0
+    _pub, cle_privee = cles_vapid()
+    if not cle_privee:
+        return 0
     data = json.dumps(payload)
     claims = {"sub": f"mailto:{getattr(settings, 'VAPID_EMAIL', '') or 'admin@example.com'}"}
     for ab in AbonnementPush.objects.filter(utilisateur_id__in=user_ids):
@@ -192,7 +234,7 @@ def envoyer_push(user_ids, payload):
             webpush(
                 subscription_info={"endpoint": ab.endpoint, "keys": {"p256dh": ab.p256dh, "auth": ab.auth}},
                 data=data,
-                vapid_private_key=settings.VAPID_PRIVATE_KEY,
+                vapid_private_key=cle_privee,
                 vapid_claims=dict(claims),
                 ttl=86400,
             )

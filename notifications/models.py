@@ -56,3 +56,14 @@ class PreferenceNotification(models.Model):
 
     def __str__(self):
         return f"Préférences de {self.utilisateur}"
+
+
+class ClesPush(models.Model):
+    """Clés Web Push (VAPID) créées automatiquement par le serveur : aucune configuration à faire."""
+
+    cle_publique = models.CharField(max_length=200)
+    cle_privee = models.CharField(max_length=200)
+    cree_le = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Clés de notifications push"

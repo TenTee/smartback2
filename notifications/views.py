@@ -97,7 +97,9 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="push/cle-publique")
     def cle_publique(self, request):
-        return Response({"cle": getattr(settings, "VAPID_PUBLIC_KEY", ""), "actif": push_configure()})
+        from .services import cles_vapid, envoi_disponible
+        pub, _priv = cles_vapid()
+        return Response({"cle": pub or "", "actif": bool(pub) and envoi_disponible()})
 
     @action(detail=False, methods=["post", "delete"], url_path="push/abonnement")
     def abonnement(self, request):

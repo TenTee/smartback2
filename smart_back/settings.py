@@ -76,7 +76,7 @@ INSTALLED_APPS = [
 ]
 
 # -------------------------
-# Notifications push (Web Push / VAPID) — clés générées par : python manage.py generer_cles_vapid
+# Notifications push : clés créées automatiquement en base (facultatif : les imposer via ces variables)
 # -------------------------
 VAPID_PUBLIC_KEY = os.environ.get('VAPID_PUBLIC_KEY', '')
 VAPID_PRIVATE_KEY = os.environ.get('VAPID_PRIVATE_KEY', '')
