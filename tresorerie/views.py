@@ -647,3 +647,86 @@ class RapportsView(APIView):
             "par_mode": [{"mode": dict(Operation.MODES).get(r["mode"], r["mode"]), "type": r["type"], "montant": float(r["t"]), "nombre": r["n"]}
                          for r in val.exclude(type=Operation.VIREMENT).values("mode", "type").annotate(t=Sum("montant"), n=Count("id"))],
         })
+
+
+# ---------------------------------------------------------------------------
+SALAIRES = ("SAL", "CHS", "VAC")
+
+
+class RecapAnneesView(APIView):
+    """Récapitulatif financier par année académique.
+
+    Une opération appartient à une année par son champ année académique, sinon par sa date (période de l'année).
+    GET ?detail=<id année> : ajoute l'évolution mensuelle et le recouvrement par classe de cette année.
+    """
+    permission_classes = [DroitFinance]
+
+    @staticmethod
+    def _ops(annee, dd, df):
+        return Operation.objects.filter(
+            Q(annee_academique=annee) | Q(annee_academique__isnull=True, date__gte=dd, date__lte=df)
+        )
+
+    def get(self, request):
+        from academique.models import AnneeAcademique
+        initialiser()
+        today = timezone.localdate()
+        annees = sorted(AnneeAcademique.objects.all(), key=lambda a: (a.date_debut or dt.date.min, a.libelle))
+        detail_id = request.query_params.get("detail")
+        if not detail_id:
+            active = next((a for a in annees if a.est_active), annees[-1] if annees else None)
+            detail_id = active.id if active else None
+        comptes = list(CompteTresorerie.objects.all())
+        res = []
+        for a in annees:
+            dd, df = periode_annee(a)
+            ops = self._ops(a, dd, df)
+            val = ops.filter(statut=Operation.VALIDEE)
+            somme = lambda qs: float(qs.aggregate(t=Sum("montant"))["t"] or 0)  # noqa: E731
+            rec = val.filter(type=Operation.RECETTE)
+            dep = val.filter(type=Operation.DEPENSE)
+            r_ins = somme(rec.filter(categorie__code="SCO-INS"))
+            r_for = somme(rec.filter(categorie__code="SCO-FOR"))
+            r_tot = somme(rec)
+            d_sal = somme(dep.filter(categorie__code__in=SALAIRES))
+            d_tot = somme(dep)
+            classes = recouvrement(a)
+            attendu = sum(c["attendu"] for c in classes)
+            encaisse = sum(c["encaisse"] for c in classes)
+            budget = Budget.objects.filter(annee_academique=a).first()
+            bud = None
+            if budget:
+                lignes = budget.lignes.select_related("categorie")
+                bud = {s: float(sum(l.montant_prevu for l in lignes if l.categorie.sens == s)) for s in ("recette", "depense")}
+            fin = min(df, today)
+            attente = ops.filter(statut__in=[Operation.EN_ATTENTE, Operation.APPROUVEE])
+            par_cat = lambda qs: [  # noqa: E731
+                {"categorie": r["categorie__libelle"] or "Sans catégorie", "code": r["categorie__code"] or "", "montant": float(r["t"])}
+                for r in qs.values("categorie__libelle", "categorie__code").annotate(t=Sum("montant")).order_by("-t")
+            ]
+            ligne = {
+                "id": a.id, "libelle": a.libelle, "est_active": a.est_active, "date_debut": dd, "date_fin": df,
+                "statut": "a_venir" if dd > today else ("en_cours" if df >= today else "terminee"),
+                "recettes": {"total": r_tot, "inscription": r_ins, "formation": r_for, "scolarite": r_ins + r_for, "autres": r_tot - r_ins - r_for},
+                "depenses": {"total": d_tot, "salaires": d_sal, "autres": d_tot - d_sal},
+                "resultat": r_tot - d_tot,
+                "scolarite": {
+                    "effectif": sum(c["effectif"] for c in classes), "soldes": sum(c["soldes"] for c in classes),
+                    "attendu": attendu, "encaisse": encaisse, "reste": max(0.0, attendu - encaisse),
+                    "taux": round(encaisse * 100 / attendu, 1) if attendu else 0,
+                },
+                "budget": {"recettes_prevues": bud["recette"], "depenses_prevues": bud["depense"]} if bud else None,
+                "tresorerie_fin": float(sum(c.solde(fin) for c in comptes)) if dd <= today else None,
+                "en_attente": {
+                    "recettes": somme(attente.filter(type=Operation.RECETTE)), "depenses": somme(attente.filter(type=Operation.DEPENSE)),
+                    "nombre": attente.count(),
+                },
+                "recettes_par_categorie": par_cat(rec),
+                "depenses_par_categorie": par_cat(dep),
+                "nb_operations": val.count(),
+            }
+            if str(a.id) == str(detail_id):
+                ligne["par_mois"] = _par_mois(val, dd, df)
+                ligne["classes"] = classes
+            res.append(ligne)
+        return Response({"annees": res, "detail": int(detail_id) if detail_id else None})
