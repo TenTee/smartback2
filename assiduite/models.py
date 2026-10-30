@@ -20,12 +20,14 @@ class AssiduiteRecord(models.Model):
     minutes_retard = models.PositiveIntegerField(null=True, blank=True)
     justifie = models.BooleanField(default=False)
     justificatif = models.FileField(upload_to="assiduite/justificatifs/", null=True, blank=True)
+    # Justification écrite (motif, explication) : alternative ou complément au fichier
+    justificatif_texte = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
         from django.core.exceptions import ValidationError
-        if self.justifie and not self.justificatif:
-            raise ValidationError({"justificatif": "Un fichier justificatif est obligatoire pour justifier une absence ou un retard."})
+        if self.justifie and not self.justificatif and not (self.justificatif_texte or "").strip():
+            raise ValidationError({"justificatif": "Joignez un fichier ou écrivez la justification de l'absence ou du retard."})
     
     def save(self, *args, **kwargs):
         self.full_clean()

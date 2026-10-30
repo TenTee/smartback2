@@ -32,6 +32,7 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
             "minutes_retard",
             "justifie",
             "justificatif",
+            "justificatif_texte",
             "parent_nom",
             "parent_whatsapp",
             "created_at",
@@ -44,6 +45,7 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
         minutes = attrs.get("minutes_retard")
         justifie = attrs.get("justifie", self.instance.justifie if self.instance else False)
         justificatif = attrs.get("justificatif", self.instance.justificatif if self.instance else None)
+        texte = attrs.get("justificatif_texte", self.instance.justificatif_texte if self.instance else "")
 
         if type_value == "RETARD":
             if minutes is None:
@@ -51,8 +53,8 @@ class AssiduiteRecordSerializer(serializers.ModelSerializer):
         if type_value == "ABSENCE":
             attrs["minutes_retard"] = None
         
-        if justifie and not justificatif:
-            raise serializers.ValidationError({"justificatif": "Un fichier justificatif est obligatoire pour justifier une absence ou un retard."})
+        if justifie and not justificatif and not (texte or "").strip():
+            raise serializers.ValidationError({"justificatif": "Joignez un fichier ou écrivez la justification de l'absence ou du retard."})
 
         # Le cours est fixé par l'emploi du temps : l'absence / le retard porte sur une séance du jour
         from academique.middleware import get_current_academic_year_id
