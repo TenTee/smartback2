@@ -400,6 +400,10 @@ class Paiement(models.Model):
         help_text="Importer une photo ou un PDF comme preuve du paiement",
     )
     date_paiement = models.DateTimeField(auto_now_add=True)
+    # Caisse / compte où l'argent a été encaissé (trésorerie). Vide : compte par défaut selon le moyen de paiement.
+    compte_tresorerie = models.ForeignKey(
+        "tresorerie.CompteTresorerie", on_delete=models.SET_NULL, null=True, blank=True, related_name="paiements_scolarite",
+    )
 
     def resolve_annee_academique_id(self):
         """Année du paiement : celle des frais, sinon l'année sélectionnée (si l'étudiant y est

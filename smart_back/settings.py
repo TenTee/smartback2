@@ -73,6 +73,7 @@ INSTALLED_APPS = [
     'notifications',
     'messagerie',
     'attestations',
+    'tresorerie',
 ]
 
 # -------------------------

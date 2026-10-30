@@ -177,6 +177,7 @@ class PaiementSerializer(serializers.ModelSerializer):
     frais_libelle = serializers.CharField(source="frais.libelle", read_only=True)
     classe_nom = serializers.CharField(source="frais.classe.nom", read_only=True)
     annee_academique_libelle = serializers.CharField(source="annee_academique.libelle", read_only=True)
+    numero_recu = serializers.SerializerMethodField()
 
     class Meta:
         model = Paiement
@@ -198,8 +199,15 @@ class PaiementSerializer(serializers.ModelSerializer):
             "moyen_paiement",
             "justificatif",
             "date_paiement",
+            "compte_tresorerie",
+            "numero_recu",
         ]
-        read_only_fields = ["solde_restant", "date_paiement"]
+        read_only_fields = ["solde_restant", "date_paiement", "numero_recu"]
+
+    def get_numero_recu(self, obj):
+        """Numéro de la recette de trésorerie correspondante (sert de numéro de reçu)."""
+        from tresorerie.models import Operation
+        return Operation.objects.filter(source_type="paiement", source_id=obj.pk).values_list("numero", flat=True).first()
 
 
 class PaiementAggregatedSerializer(serializers.Serializer):
