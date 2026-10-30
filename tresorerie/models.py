@@ -41,6 +41,50 @@ class CompteTresorerie(models.Model):
         s = sorties.aggregate(t=Sum("montant"))["t"] or ZERO
         return Decimal(self.solde_initial) + e - s
 
+    def annee_initiale_id(self):
+        """Année académique à laquelle appartient le solde initial (celle qui contient sa date, sinon la première)."""
+        from academique.models import AnneeAcademique
+        qs = AnneeAcademique.objects.exclude(date_debut__isnull=True)
+        if self.date_solde_initial:
+            a = qs.filter(date_debut__lte=self.date_solde_initial, date_fin__gte=self.date_solde_initial).first()
+            if a:
+                return a.id
+        a = qs.order_by("date_debut").first() or AnneeAcademique.objects.order_by("libelle").first()
+        return a.id if a else None
+
+    def solde_annee(self, annee, jusqu_au=None):
+        """Argent de l'année académique sur ce compte : chaque année a sa propre caisse.
+
+        = solde initial (s'il appartient à l'année) + recettes − dépenses ± virements de l'année
+          + reports reçus d'autres années − reports cédés à d'autres années.
+        """
+        if annee is None:
+            return self.solde(jusqu_au)
+        from academique.models import AnneeAcademique
+        if not hasattr(annee, "date_fin"):
+            annee = AnneeAcademique.objects.filter(pk=annee).first()
+            if annee is None:
+                return self.solde(jusqu_au)
+        aid = annee.id
+        ops = Operation.objects.filter(statut=Operation.VALIDEE)
+        dans = ops.filter(annee_academique_id=aid)
+        if jusqu_au:
+            dans = dans.filter(date__lte=jusqu_au)
+        e = dans.filter(Q(type=Operation.RECETTE, compte=self) | Q(type=Operation.VIREMENT, compte_destination=self)
+                        | Q(type=Operation.REPORT, compte=self)).aggregate(t=Sum("montant"))["t"] or ZERO
+        s = dans.filter(Q(type=Operation.DEPENSE, compte=self) | Q(type=Operation.VIREMENT, compte=self)).aggregate(t=Sum("montant"))["t"] or ZERO
+        cedes = ops.filter(type=Operation.REPORT, annee_origine_id=aid, compte=self)
+        # Un report fait après la fin de l'année d'origine est compté à sa date de fin (bilan de fin d'année).
+        if jusqu_au and not (annee.date_fin and jusqu_au >= annee.date_fin):
+            cedes = cedes.filter(date__lte=jusqu_au)
+        cede = cedes.aggregate(t=Sum("montant"))["t"] or ZERO
+        base = ZERO
+        if self.annee_initiale_id() == aid:
+            limite = max(jusqu_au, annee.date_debut) if (jusqu_au and annee.date_debut) else jusqu_au
+            if not limite or not self.date_solde_initial or self.date_solde_initial <= limite:
+                base = Decimal(self.solde_initial)
+        return base + e - s - cede
+
 
 class CategorieFinance(models.Model):
     RECETTE, DEPENSE = "recette", "depense"
@@ -83,8 +127,9 @@ class Fournisseur(models.Model):
 
 
 class Operation(models.Model):
-    RECETTE, DEPENSE, VIREMENT = "recette", "depense", "virement"
-    TYPES = [(RECETTE, "Recette"), (DEPENSE, "Dépense"), (VIREMENT, "Virement interne")]
+    RECETTE, DEPENSE, VIREMENT, REPORT = "recette", "depense", "virement", "report"
+    TYPES = [(RECETTE, "Recette"), (DEPENSE, "Dépense"), (VIREMENT, "Virement interne"),
+             (REPORT, "Report d'une autre année")]
 
     EN_ATTENTE, APPROUVEE, VALIDEE, REJETEE, ANNULEE = "en_attente", "approuvee", "validee", "rejetee", "annulee"
     STATUTS = [
@@ -119,6 +164,8 @@ class Operation(models.Model):
     source_type = models.CharField(max_length=30, blank=True, default="")
     source_id = models.PositiveIntegerField(null=True, blank=True)
     annee_academique = models.ForeignKey("academique.AnneeAcademique", on_delete=models.SET_NULL, null=True, blank=True, related_name="operations_tresorerie")
+    # Report : argent repris d'une année précédente (annee_origine) pour l'année annee_academique.
+    annee_origine = models.ForeignKey("academique.AnneeAcademique", on_delete=models.SET_NULL, null=True, blank=True, related_name="reports_cedes")
     date_echeance = models.DateField(null=True, blank=True, help_text="Date limite de paiement (dépense)")
     notes = models.TextField(blank=True, default="")
     motif_rejet = models.CharField(max_length=255, blank=True, default="")

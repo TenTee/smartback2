@@ -11,7 +11,7 @@ from .models import CategorieFinance, ClotureCaisse, CompteTresorerie, Operation
 
 logger = logging.getLogger(__name__)
 
-PREFIXES = {Operation.RECETTE: "REC", Operation.DEPENSE: "DEP", Operation.VIREMENT: "VIR"}
+PREFIXES = {Operation.RECETTE: "REC", Operation.DEPENSE: "DEP", Operation.VIREMENT: "VIR", Operation.REPORT: "REP"}
 
 # Catégories par défaut (codes utilisés par les opérations automatiques)
 CATEGORIES_DEFAUT = [
@@ -91,8 +91,32 @@ def numeroter(type_, date):
     return f"{prefixe}{n:06d}"
 
 
+def annee_pour(date=None):
+    """Année académique d'une opération : l'année choisie dans l'application, sinon celle qui contient la date,
+    sinon l'année active."""
+    from academique.middleware import get_current_academic_year_id
+    from academique.models import AnneeAcademique
+    aid = get_current_academic_year_id()
+    if aid and AnneeAcademique.objects.filter(pk=aid).exists():
+        return aid
+    return annee_par_date(date)
+
+
+def annee_par_date(date=None):
+    from academique.models import AnneeAcademique
+    date = date or date_du_jour()
+    a = (AnneeAcademique.objects.filter(date_debut__lte=date, date_fin__gte=date).first()
+         or AnneeAcademique.objects.filter(est_active=True).first())
+    return a.id if a else None
+
+
 def creer_operation(**champs):
-    """Crée une opération numérotée (réessaie si deux numéros sont pris en même temps)."""
+    """Crée une opération numérotée (réessaie si deux numéros sont pris en même temps).
+    Toute opération appartient à une année académique."""
+    if champs.get("annee_academique") is None:
+        champs.pop("annee_academique", None)
+    if not champs.get("annee_academique") and not champs.get("annee_academique_id"):
+        champs["annee_academique_id"] = annee_par_date(champs.get("date"))
     for _ in range(6):
         try:
             with transaction.atomic():
@@ -143,6 +167,8 @@ def synchroniser_paiement(paiement, compte=None):
     }
     if op:
         for k, v in valeurs.items():
+            if k == "annee_academique_id" and not v:
+                continue
             setattr(op, k, v)
         op.save()
         return op

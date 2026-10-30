@@ -14,14 +14,20 @@ def _nom(u):
 class CompteSerializer(serializers.ModelSerializer):
     type_libelle = serializers.CharField(source="get_type_display", read_only=True)
     solde = serializers.SerializerMethodField()
+    solde_physique = serializers.SerializerMethodField()
     derniere_cloture = serializers.SerializerMethodField()
 
     class Meta:
         model = CompteTresorerie
         fields = ["id", "nom", "type", "type_libelle", "banque", "numero", "solde_initial", "date_solde_initial",
-                  "actif", "ordre", "solde", "derniere_cloture"]
+                  "actif", "ordre", "solde", "solde_physique", "derniere_cloture"]
 
     def get_solde(self, obj):
+        """Argent de l'année académique choisie sur ce compte."""
+        return float(obj.solde_annee(self.context.get("annee")))
+
+    def get_solde_physique(self, obj):
+        """Argent réellement présent (toutes années confondues) : sert à la clôture de caisse."""
         return float(obj.solde())
 
     def get_derniere_cloture(self, obj):
@@ -49,10 +55,16 @@ class FournisseurSerializer(serializers.ModelSerializer):
 
     def get_total_paye(self, obj):
         from django.db.models import Sum
-        return float(obj.operations.filter(statut=Operation.VALIDEE).aggregate(t=Sum("montant"))["t"] or 0)
+        qs = obj.operations.filter(statut=Operation.VALIDEE)
+        if self.context.get("annee"):
+            qs = qs.filter(annee_academique=self.context["annee"])
+        return float(qs.aggregate(t=Sum("montant"))["t"] or 0)
 
     def get_nb_operations(self, obj):
-        return obj.operations.exclude(statut=Operation.ANNULEE).count()
+        qs = obj.operations.exclude(statut=Operation.ANNULEE)
+        if self.context.get("annee"):
+            qs = qs.filter(annee_academique=self.context["annee"])
+        return qs.count()
 
 
 class OperationSerializer(serializers.ModelSerializer):
@@ -62,6 +74,8 @@ class OperationSerializer(serializers.ModelSerializer):
     source_libelle = serializers.CharField(source="get_source_display", read_only=True)
     compte_nom = serializers.CharField(source="compte.nom", read_only=True)
     compte_destination_nom = serializers.CharField(source="compte_destination.nom", read_only=True)
+    annee_libelle = serializers.CharField(source="annee_academique.libelle", read_only=True)
+    annee_origine_libelle = serializers.CharField(source="annee_origine.libelle", read_only=True)
     categorie_libelle = serializers.CharField(source="categorie.libelle", read_only=True)
     categorie_code = serializers.CharField(source="categorie.code", read_only=True)
     fournisseur_nom = serializers.CharField(source="fournisseur.nom", read_only=True)
@@ -80,10 +94,11 @@ class OperationSerializer(serializers.ModelSerializer):
             "compte_destination_nom", "categorie", "categorie_libelle", "categorie_code", "libelle", "tiers",
             "fournisseur", "fournisseur_nom", "etudiant", "etudiant_nom", "etudiant_matricule", "mode", "mode_libelle",
             "reference", "piece_jointe", "statut", "statut_libelle", "source", "source_libelle", "annee_academique",
+            "annee_libelle", "annee_origine", "annee_origine_libelle",
             "date_echeance", "notes", "motif_rejet", "rapproche", "cree_par_nom", "cree_le", "approuve_par_nom",
             "approuve_le", "valide_par_nom", "valide_le", "modifiable",
         ]
-        read_only_fields = ["numero", "statut", "source", "motif_rejet", "cree_le", "approuve_le", "valide_le"]
+        read_only_fields = ["numero", "statut", "source", "motif_rejet", "cree_le", "approuve_le", "valide_le", "annee_origine"]
 
     def get_cree_par_nom(self, o):
         return _nom(o.cree_par)
@@ -98,15 +113,20 @@ class OperationSerializer(serializers.ModelSerializer):
         return bool(o.rapprochement_id)
 
     def get_modifiable(self, o):
-        return o.source == "manuel" and o.statut not in (Operation.ANNULEE,) and not o.rapprochement_id
+        return (o.source == "manuel" and o.type != Operation.REPORT and o.statut not in (Operation.ANNULEE,)
+                and not o.rapprochement_id)
 
     def validate(self, data):
         inst = self.instance
         get = lambda k: data[k] if k in data else (getattr(inst, k) if inst else None)  # noqa: E731
         type_ = get("type")
+        if type_ == Operation.REPORT and not inst:
+            raise serializers.ValidationError({"type": ["Un report se fait depuis Trésorerie → « Reprendre l'argent d'une autre année »."]})
         montant = get("montant")
         if montant is None or montant <= 0:
             raise serializers.ValidationError({"montant": ["Le montant doit être supérieur à 0."]})
+        if type_ == Operation.REPORT:
+            return data
         if type_ == Operation.VIREMENT:
             if not get("compte") or not get("compte_destination"):
                 raise serializers.ValidationError({"compte_destination": ["Choisissez le compte de départ et le compte d'arrivée."]})
