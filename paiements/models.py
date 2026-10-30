@@ -536,6 +536,35 @@ class Paiement(models.Model):
             plan.save(update_fields=["status", "updated_at"])
 
 
+def recalculer_echeancier(etudiant_id, annee_academique_id=None, filiere_id=None):
+    """Recalcule les tranches payées de l'échéancier d'un étudiant à partir de ses paiements de formation
+    (après la modification ou la suppression d'un paiement)."""
+    if not etudiant_id:
+        return
+    plans = StudentPaymentPlan.objects.filter(
+        etudiant_id=etudiant_id, status__in=[StudentPaymentPlan.STATUS_ACTIVE, StudentPaymentPlan.STATUS_COMPLETED],
+    )
+    plan = plans.filter(classe__annee_academique_id=annee_academique_id).first() if annee_academique_id else None
+    if not plan and filiere_id:
+        plan = plans.filter(classe__isnull=True, filiere_id=filiere_id).first()
+    if not plan:
+        return
+    paiements = Paiement.objects.filter(etudiant_id=etudiant_id, paiement_type="FORMATION")
+    if annee_academique_id:
+        paiements = paiements.filter(annee_academique_id=annee_academique_id)
+    reste = sum((Decimal(p.montant_paye or 0) for p in paiements), Decimal("0"))
+    for installment in plan.installments.order_by("due_date", "order"):
+        applique = min(Decimal(installment.amount_due or 0), max(reste, Decimal("0")))
+        installment.amount_paid = applique
+        installment.save(update_fields=["amount_paid", "status", "updated_at"])
+        reste -= applique
+    termine = not plan.installments.exclude(status=StudentPaymentInstallment.STATUS_PAID).exists()
+    nouveau = StudentPaymentPlan.STATUS_COMPLETED if termine else StudentPaymentPlan.STATUS_ACTIVE
+    if plan.status != nouveau:
+        plan.status = nouveau
+        plan.save(update_fields=["status", "updated_at"])
+
+
 def split_amount(total_amount, count):
     if count <= 0:
         return []

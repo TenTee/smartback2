@@ -3,7 +3,10 @@ from django.db import models
 from django.db.models import Max, Sum, Value, DecimalField, Count, Q
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.db import transaction
 from rest_framework import generics
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,6 +22,7 @@ from .models import (
     Paiement,
     StudentPaymentInstallment,
     StudentPaymentPlan,
+    recalculer_echeancier,
 )
 from .serializers import (
     ClassePaymentScheduleSerializer,
@@ -51,9 +55,88 @@ class PaiementListCreate(generics.ListCreateAPIView):
         return queryset.order_by("-date_paiement")
 
 
+class _EcritureFinance(BasePermission):
+    """Lecture : tout utilisateur connecté. Modification / suppression : droit Finances en écriture."""
+    message = "Seul un utilisateur avec le droit Finances en écriture peut modifier ou supprimer un paiement."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        from tresorerie.views import DroitFinance
+        return DroitFinance().has_permission(request, view)
+
+
+def _nom(user):
+    return f"{getattr(user, 'prenoms', '') or ''} {getattr(user, 'noms', '') or ''}".strip() or getattr(user, "username", "")
+
+
+def _controler_tresorerie(paiement, nouveau_compte=None):
+    """Refuse la modification d'un paiement déjà rapproché ou compris dans une caisse clôturée."""
+    from tresorerie.models import Operation
+    from tresorerie.services import OperationVerrouillee, verifier_verrou
+    op = Operation.objects.filter(source_type="paiement", source_id=paiement.pk).select_related("compte").first()
+    if not op:
+        return None
+    if op.rapprochement_id:
+        raise ValidationError({"detail": f"Le paiement (reçu {op.numero}) est pointé sur un relevé bancaire : annulez d'abord le rapprochement."})
+    try:
+        verifier_verrou(op.date, op.compte, nouveau_compte)
+    except OperationVerrouillee as e:
+        raise ValidationError({"detail": f"{e} Rouvrez la clôture de caisse pour modifier ce paiement."})
+    return op
+
+
 class PaiementDetail(generics.RetrieveUpdateDestroyAPIView):
+    """Consultation, modification (montant, type, mode, caisse) et suppression d'un paiement de scolarité.
+
+    La recette de trésorerie et l'échéancier de l'étudiant sont mis à jour automatiquement ; la modification
+    est tracée dans les notes de la recette, la suppression annule la recette (le numéro de reçu reste au journal).
+    """
     queryset = Paiement.objects.select_related("etudiant", "filiere", "frais", "frais__classe").all()
     serializer_class = PaiementSerializer
+    permission_classes = [_EcritureFinance]
+
+    def perform_update(self, serializer):
+        from tresorerie.models import CompteTresorerie
+        avant = serializer.instance
+        ancien = {"montant": avant.montant_paye, "type": avant.paiement_type, "mode": avant.moyen_paiement}
+        montant = serializer.validated_data.get("montant_paye", avant.montant_paye)
+        if montant is None or Decimal(montant) <= 0:
+            raise ValidationError({"montant_paye": ["Le montant doit être supérieur à 0."]})
+        nouveau_compte = serializer.validated_data.get("compte_tresorerie")
+        _controler_tresorerie(avant, nouveau_compte if isinstance(nouveau_compte, CompteTresorerie) else None)
+        with transaction.atomic():
+            p = serializer.save()
+            recalculer_echeancier(p.etudiant_id, p.annee_academique_id, p.filiere_id)
+            from tresorerie.models import Operation
+            op = Operation.objects.filter(source_type="paiement", source_id=p.pk).first()
+            if op:
+                changements = []
+                if Decimal(ancien["montant"]) != Decimal(p.montant_paye):
+                    changements.append(f"montant {Decimal(ancien['montant']):,.0f} → {Decimal(p.montant_paye):,.0f}".replace(",", " "))
+                if ancien["type"] != p.paiement_type:
+                    changements.append(f"type {ancien['type']} → {p.paiement_type}")
+                if ancien["mode"] != p.moyen_paiement:
+                    changements.append(f"mode {ancien['mode']} → {p.moyen_paiement}")
+                motif = str(self.request.data.get("motif") or "").strip()
+                trace = (f"Modifié le {timezone.localtime():%d/%m/%Y %H:%M} par {_nom(self.request.user)}"
+                         f"{' : ' + ', '.join(changements) if changements else ''}{' — motif : ' + motif if motif else ''}")
+                op.notes = f"{op.notes}\n{trace}".strip()
+                op.save(update_fields=["notes"])
+
+    def perform_destroy(self, instance):
+        _controler_tresorerie(instance)
+        motif = str(self.request.data.get("motif") or self.request.query_params.get("motif") or "").strip()
+        if not motif:
+            raise ValidationError({"motif": ["Indiquez le motif de la suppression."]})
+        etudiant_id, annee_id, filiere_id = instance.etudiant_id, instance.annee_academique_id, instance.filiere_id
+        with transaction.atomic():
+            from tresorerie.services import annuler_source
+            annuler_source("paiement", instance.pk, f"Paiement supprimé le {timezone.localtime():%d/%m/%Y} par {_nom(self.request.user)} : {motif}")
+            instance.delete()
+            recalculer_echeancier(etudiant_id, annee_id, filiere_id)
 
 
 class PaiementAggregated(APIView):
