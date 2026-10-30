@@ -192,18 +192,34 @@ def synchroniser_ancienne_depense(dep):
 
 
 def synchroniser_ancien_revenu(rev):
-    statut = rev.statut or ""
-    st = Operation.VALIDEE if statut.lower().startswith("valid") else (Operation.REJETEE if statut.lower().startswith("rejet") else Operation.EN_ATTENTE)
+    """Revenu de l'ancien module → recette de trésorerie « à valider ».
+
+    Un revenu déclaré n'est pas forcément de l'argent en caisse (doublon d'un paiement de scolarité,
+    montant attendu…) : il n'entre dans les soldes qu'après validation dans « Recettes & dépenses ».
+    """
+    rejete = (rev.statut or "").lower().startswith("rejet")
     op = Operation.objects.filter(source_type="revenu", source_id=rev.pk).first()
-    valeurs = {"montant": rev.montant, "categorie": categorie(CATEGORIES_ANCIENNES_RECETTES.get(rev.categorie, "REC-AUT")),
-               "libelle": str(rev.libelle)[:255], "tiers": str(rev.responsable or "")[:200], "statut": st}
+    valeurs = {"categorie": categorie(CATEGORIES_ANCIENNES_RECETTES.get(rev.categorie, "REC-AUT")),
+               "libelle": str(rev.libelle)[:255], "tiers": str(rev.responsable or "")[:200]}
     if op:
+        if op.statut in (Operation.EN_ATTENTE, Operation.APPROUVEE):
+            valeurs["montant"] = rev.montant
+            if rejete:
+                valeurs.update(statut=Operation.REJETEE, motif_rejet="Revenu rejeté dans l'ancien module")
+        elif op.statut == Operation.VALIDEE and rejete and not op.rapprochement_id:
+            valeurs.update(statut=Operation.ANNULEE, motif_rejet="Revenu rejeté dans l'ancien module")
         for k, v in valeurs.items():
             setattr(op, k, v)
         op.save()
         return op
+    notes = NOTE_DOUBLON if rev.categorie == "Inscription" else ""
     return creer_operation(type=Operation.RECETTE, date=rev.date_entree or date_du_jour(), compte=compte_par_defaut("especes"),
-                           source="ancien", source_type="revenu", source_id=rev.pk, mode="especes", **valeurs)
+                           source="ancien", source_type="revenu", source_id=rev.pk, mode="especes", montant=rev.montant,
+                           statut=Operation.REJETEE if rejete else Operation.EN_ATTENTE, notes=notes, **valeurs)
+
+
+NOTE_DOUBLON = ("Revenu « Inscription » de l'ancien module : vérifiez qu'il ne fait pas doublon avec un paiement "
+                "de scolarité (déjà compté en caisse) avant de le valider.")
 
 
 # ---------------------------------------------------------------------------

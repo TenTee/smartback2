@@ -312,9 +312,11 @@ class OperationViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def payer(self, request, pk=None):
+        """Dépense : paiement. Recette en attente : validation de l'encaissement (l'argent est arrivé)."""
         op = self.get_object()
-        if op.type != Operation.DEPENSE or op.statut not in (Operation.EN_ATTENTE, Operation.APPROUVEE):
-            raise ValidationError({"detail": "Seule une dépense approuvée (ou en attente) peut être payée."})
+        if not ((op.type == Operation.DEPENSE and op.statut in (Operation.EN_ATTENTE, Operation.APPROUVEE))
+                or (op.type == Operation.RECETTE and op.statut == Operation.EN_ATTENTE)):
+            raise ValidationError({"detail": "Seule une dépense à payer ou une recette à valider peut être réglée."})
         compte = get_object_or_404(CompteTresorerie, pk=request.data.get("compte") or op.compte_id or 0)
         date = _date(request.data.get("date")) or timezone.localdate()
         try:
@@ -335,7 +337,7 @@ class OperationViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def annuler(self, request, pk=None):
         op = self.get_object()
-        if op.source != "manuel":
+        if op.source != "manuel" and op.source_type != "revenu":
             raise ValidationError({"detail": "Opération automatique : annulez-la depuis son module (paiement de scolarité, paie)."})
         if op.statut == Operation.ANNULEE:
             raise ValidationError({"detail": "Opération déjà annulée."})
@@ -591,7 +593,10 @@ class TableauDeBordView(APIView):
             "scolarite": {"attendu": attendu, "encaisse": encaisse, "reste": max(0, attendu - encaisse),
                           "taux": round(encaisse * 100 / attendu, 1) if attendu else 0, "classes": rec},
             "a_faire": {
-                "a_approuver": {"nombre": attente.count(), "montant": float(attente.aggregate(t=Sum("montant"))["t"] or 0)},
+                "a_approuver": {"nombre": attente.filter(type=Operation.DEPENSE).count(),
+                                "montant": float(attente.filter(type=Operation.DEPENSE).aggregate(t=Sum("montant"))["t"] or 0)},
+                "recettes_a_valider": {"nombre": attente.filter(type=Operation.RECETTE).count(),
+                                       "montant": float(attente.filter(type=Operation.RECETTE).aggregate(t=Sum("montant"))["t"] or 0)},
                 "a_payer": {"nombre": a_payer.count(), "montant": float(a_payer.aggregate(t=Sum("montant"))["t"] or 0)},
                 "en_retard": a_payer.filter(date_echeance__lt=today).count(),
                 "caisses_a_cloturer": [c["nom"] for c in caisses_non_cloturees],
