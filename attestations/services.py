@@ -7,7 +7,9 @@ from .models import DocumentDelivre
 
 
 class DelivranceImpossible(Exception):
-    pass
+    def __init__(self, message, conditions=None):
+        super().__init__(message)
+        self.conditions = conditions
 
 
 def annee_de_reference(annee_id=None):
@@ -69,6 +71,8 @@ def _numero(type_, sequence, annee, etudiant):
         return f"{sequence:04d}/CS/{libelle}"
     if type_ == DocumentDelivre.RELEVE:
         return f"{sequence:04d}/RN/{libelle}"
+    if type_ == DocumentDelivre.REUSSITE:
+        return f"{sequence:04d}/ARP/{libelle}"
     return f"CE-{libelle.split('-')[0]}-{sequence:05d}"
 
 
@@ -78,8 +82,18 @@ def emettre(type_, etudiant, user=None, canal="administration", nouveau=False, a
     nouveau=True : annule le document précédent de l'année (duplicata, informations corrigées…).
     """
     annee = annee or annee_de_reference()
+    resultats = None
+    if type_ == DocumentDelivre.REUSSITE:
+        from .reussite import conditions_reussite, message_conditions
+        res = conditions_reussite(etudiant, annee)
+        if not res["eligible"]:
+            raise DelivranceImpossible(message_conditions(etudiant, res), conditions=res["conditions"])
+        resultats = {"moyenne": res["moyenne"], "mention": res["mention"], "credits_valides": res["credits_valides"],
+                     "total_credits": res["total_credits"], "notes": res["notes"]}
     ins = verifier_eligibilite(etudiant, annee)
     existant = DocumentDelivre.objects.filter(type=type_, etudiant=etudiant, annee_academique=annee, annule=False).order_by("-id").first()
+    if existant and resultats is not None and (existant.donnees or {}).get("resultats", {}).get("moyenne") != resultats["moyenne"]:
+        nouveau = True  # notes modifiées depuis la délivrance : nouvelle attestation, l'ancienne est annulée
     if existant and not nouveau:
         existant.nb_impressions += 1
         existant.derniere_impression = timezone.now()
@@ -97,9 +111,12 @@ def emettre(type_, etudiant, user=None, canal="administration", nouveau=False, a
                 seq = (DocumentDelivre.objects.filter(type=type_, annee_academique=annee).aggregate(m=Max("sequence"))["m"] or 0) + 1
                 doc = DocumentDelivre.objects.create(
                     type=type_, sequence=seq, numero=_numero(type_, seq, annee, etudiant), etudiant=etudiant, inscription=ins,
-                    classe=ins.classe, annee_academique=annee, donnees=donnees_imprimees(etudiant, ins, annee),
+                    classe=ins.classe, annee_academique=annee,
+                    donnees={**donnees_imprimees(etudiant, ins, annee), **({"resultats": resultats} if resultats else {})},
                     delivre_par=user if getattr(user, "is_authenticated", False) else None, canal=canal,
-                    valide_jusqu_au=annee.date_fin if annee else None, derniere_impression=timezone.now(),
+                    # L'attestation de réussite n'expire pas ; certificat et carte valent pour l'année.
+                    valide_jusqu_au=None if type_ == DocumentDelivre.REUSSITE else (annee.date_fin if annee else None),
+                    derniere_impression=timezone.now(),
                 )
                 return doc, True
         except IntegrityError:

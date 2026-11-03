@@ -11,8 +11,9 @@ def nouveau_code():
 class DocumentDelivre(models.Model):
     """Registre des certificats de scolarité et cartes d'étudiant délivrés."""
 
-    CERTIFICAT, CARTE, RELEVE = "certificat", "carte", "releve"
-    TYPES = [(CERTIFICAT, "Certificat de scolarité"), (CARTE, "Carte d'étudiant"), (RELEVE, "Relevé de notes")]
+    CERTIFICAT, CARTE, RELEVE, REUSSITE = "certificat", "carte", "releve", "reussite"
+    TYPES = [(CERTIFICAT, "Certificat de scolarité"), (CARTE, "Carte d'étudiant"), (RELEVE, "Relevé de notes"),
+             (REUSSITE, "Attestation de réussite professionnelle")]
     CANAUX = [("administration", "Administration"), ("portail", "Portail étudiant")]
 
     type = models.CharField(max_length=20, choices=TYPES)

@@ -72,8 +72,8 @@ class DocumentDelivreViewSet(viewsets.ReadOnlyModelViewSet):
 
     def _type(self, request):
         t = request.data.get("type")
-        if t not in (DocumentDelivre.CERTIFICAT, DocumentDelivre.CARTE):
-            raise DelivranceImpossible("Type de document inconnu (certificat ou carte).")
+        if t not in (DocumentDelivre.CERTIFICAT, DocumentDelivre.CARTE, DocumentDelivre.REUSSITE):
+            raise DelivranceImpossible("Type de document inconnu (certificat, carte ou attestation de réussite).")
         return t
 
     @action(detail=False, methods=["post"])
@@ -85,7 +85,7 @@ class DocumentDelivreViewSet(viewsets.ReadOnlyModelViewSet):
             etu = get_object_or_404(Etudiant, pk=request.data.get("etudiant"))
             doc, cree = emettre(t, etu, request.user, "administration", bool(request.data.get("nouveau")))
         except DelivranceImpossible as e:
-            return Response({"detail": str(e)}, status=400)
+            return Response({"detail": str(e), "conditions": e.conditions}, status=400)
         return Response({"etablissement": etablissement_json(), "documents": [document_json(doc)], "nouveaux": int(cree)})
 
     @action(detail=False, methods=["post"], url_path="emettre-classe")
@@ -109,7 +109,9 @@ class DocumentDelivreViewSet(viewsets.ReadOnlyModelViewSet):
             except DelivranceImpossible as e:
                 ignores.append(str(e))
         if not docs:
-            return Response({"detail": "Aucun étudiant inscrit dans cette classe.", "ignores": ignores}, status=400)
+            msg = ("Aucun étudiant de cette classe ne remplit les conditions de l'attestation de réussite."
+                   if t == DocumentDelivre.REUSSITE else "Aucun étudiant inscrit dans cette classe.")
+            return Response({"detail": msg, "ignores": ignores}, status=400)
         return Response({"etablissement": etablissement_json(), "documents": docs, "ignores": ignores, "nouveaux": nouveaux})
 
     @action(detail=False, methods=["post"], url_path="mes-documents")
@@ -119,6 +121,8 @@ class DocumentDelivreViewSet(viewsets.ReadOnlyModelViewSet):
             raise PermissionDenied("Réservé aux étudiants.")
         try:
             t = self._type(request)
+            if t == DocumentDelivre.REUSSITE:
+                raise DelivranceImpossible("L'attestation de réussite est délivrée par l'administration.")
             doc, cree = emettre(t, etu, request.user, "portail", False)
         except DelivranceImpossible as e:
             return Response({"detail": str(e), "inscrit": False}, status=403)
@@ -143,6 +147,24 @@ class DocumentDelivreViewSet(viewsets.ReadOnlyModelViewSet):
         doc.motif_annulation = str(request.data.get("motif") or "Annulé par l'administration")[:255]
         doc.save(update_fields=["annule", "annule_le", "annule_par", "motif_annulation"])
         return Response(DocumentDelivreSerializer(doc).data)
+
+    @action(detail=False, methods=["get"], url_path="conditions-reussite")
+    def conditions_reussite(self, request):
+        """Personnel : conditions de l'attestation de réussite pour un étudiant (?etudiant=) ou toute une classe (?classe=)."""
+        from academique.models import Classe
+        from etudiants.models import Etudiant
+
+        from .reussite import conditions_reussite
+        self._personnel()
+        if request.query_params.get("classe"):
+            classe = get_object_or_404(Classe, pk=request.query_params["classe"])
+            annee = classe.annee_academique
+            etudiants = Etudiant.objects.filter(inscriptions__classe=classe).distinct().order_by("nom")
+            res = [conditions_reussite(e, annee) for e in etudiants]
+            return Response({"classe": classe.nom, "annee": annee.libelle if annee else None,
+                             "eligibles": sum(1 for r in res if r["eligible"]), "etudiants": res})
+        etu = get_object_or_404(Etudiant, pk=request.query_params.get("etudiant"))
+        return Response(conditions_reussite(etu, annee_de_reference()))
 
     @action(detail=False, methods=["get"], url_path="eligibilite")
     def eligibilite(self, request):
@@ -186,4 +208,6 @@ class VerificationView(APIView):
                          "filiere": d.get("filiere"), "niveau": d.get("niveau")},
             "annee_academique": d.get("annee_academique"),
             "resultats": d.get("resultats") if doc.type == DocumentDelivre.RELEVE else None,
+            "reussite": ({"moyenne": (d.get("resultats") or {}).get("moyenne"), "mention": (d.get("resultats") or {}).get("mention")}
+                         if doc.type == DocumentDelivre.REUSSITE else None),
         })
