@@ -9,6 +9,7 @@ from .views import (
     FormateurPortalViewSet,
     CoursDocumentViewSet,
     CoursDocumentEtudiantView,
+    CoursDocumentTelechargerView,
     FormateurSuiviView,
     FormateursSuiviListView,
 )
@@ -26,4 +27,5 @@ urlpatterns = [
     path('<int:pk>/generate-account/', FormateurGenerateAccountView.as_view(), name='formateur-generate-account'),
     path('', include(router.urls)),
     path('cours-etudiants/', CoursDocumentEtudiantView.as_view(), name='cours-etudiants'),
+    path('cours-etudiants/<int:pk>/telecharger/', CoursDocumentTelechargerView.as_view(), name='cours-telecharger'),
 ]

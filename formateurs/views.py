@@ -708,8 +708,38 @@ class CoursDocumentViewSet(viewsets.ModelViewSet):
             return CoursDocument.objects.filter(formateur=user.formateur_profile)
         return CoursDocument.objects.none()
 
+    def _classes(self, serializer, formateur):
+        """Classes destinataires : celles choisies (parmi les classes du formateur), sinon toutes ses classes du module."""
+        from rest_framework.exceptions import ValidationError
+        from academique.middleware import get_current_academic_year_id
+        from .supports import classes_du_formateur
+        module = serializer.validated_data.get('module') or getattr(serializer.instance, 'module', None)
+        autorisees = classes_du_formateur(formateur, module.id if module else None)
+        choisies = serializer.validated_data.get('classes')
+        if choisies:
+            hors = [str(c) for c in choisies if c.id not in set(autorisees.values_list('id', flat=True))]
+            if hors:
+                raise ValidationError({'classes': [f"Vous n'enseignez pas ce module dans : {', '.join(hors)}."]})
+            return choisies
+        if 'classes' in serializer.validated_data or serializer.instance is None:
+            annee = get_current_academic_year_id()
+            de_l_annee = list(classes_du_formateur(formateur, module.id if module else None, annee)) if annee else []
+            return de_l_annee or list(autorisees)
+        return None
+
     def perform_create(self, serializer):
-        serializer.save(formateur=self.request.user.formateur_profile)
+        formateur = self.request.user.formateur_profile
+        classes = self._classes(serializer, formateur)
+        doc = serializer.save(formateur=formateur, classes=classes or [])
+        return doc
+
+    def perform_update(self, serializer):
+        formateur = self.request.user.formateur_profile
+        classes = self._classes(serializer, formateur)
+        if classes is None:
+            serializer.save()
+        else:
+            serializer.save(classes=classes)
 
     @action(detail=True, methods=['patch'], url_path='toggle-visibilite')
     def toggle_visibilite(self, request, pk=None):
@@ -720,11 +750,40 @@ class CoursDocumentViewSet(viewsets.ModelViewSet):
 
 
 class CoursDocumentEtudiantView(generics.ListAPIView):
+    """Supports de cours visibles par l'étudiant connecté : uniquement ceux de sa classe."""
     serializer_class = CoursDocumentSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return CoursDocument.objects.filter(est_visible_etudiants=True)
+        from .supports import supports_visibles
+        return supports_visibles(self.request.user)
+
+
+class CoursDocumentTelechargerView(generics.GenericAPIView):
+    """Téléchargement d'un support (fichier envoyé en pièce jointe, compatible téléphone)."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        import mimetypes
+        import os
+        from django.http import FileResponse, Http404
+        from .supports import supports_visibles
+        doc = supports_visibles(request.user).filter(pk=pk).first()
+        if doc is None and hasattr(request.user, 'formateur_profile'):
+            doc = CoursDocument.objects.filter(pk=pk, formateur=request.user.formateur_profile).first()
+        if doc is None or not doc.fichier:
+            raise Http404("Support introuvable ou non destiné à votre classe.")
+        try:
+            fichier = doc.fichier.open('rb')
+        except (FileNotFoundError, OSError):
+            raise Http404("Le fichier de ce support est introuvable sur le serveur.")
+        ext = os.path.splitext(doc.fichier.name)[1]
+        base = ''.join(c if c.isalnum() or c in ' -_' else '_' for c in doc.titre).strip() or 'support'
+        nom = base if base.lower().endswith(ext.lower()) else f"{base}{ext}"
+        reponse = FileResponse(fichier, as_attachment=True, filename=nom,
+                               content_type=mimetypes.guess_type(doc.fichier.name)[0] or 'application/octet-stream')
+        reponse['Access-Control-Expose-Headers'] = 'Content-Disposition'
+        return reponse
 
 
 # ---------------------------------------------------------------------------

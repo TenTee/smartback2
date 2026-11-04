@@ -113,6 +113,8 @@ class FormateurPortalSerializer(serializers.ModelSerializer):
 class CoursDocumentSerializer(serializers.ModelSerializer):
     module_nom = serializers.CharField(source='module.nom', read_only=True)
     fichier_url = serializers.SerializerMethodField()
+    classes_noms = serializers.SerializerMethodField()
+    nom_fichier = serializers.SerializerMethodField()
 
     class Meta:
         model = CoursDocument
@@ -121,6 +123,9 @@ class CoursDocumentSerializer(serializers.ModelSerializer):
             'formateur',
             'module',
             'module_nom',
+            'classes',
+            'classes_noms',
+            'nom_fichier',
             'titre',
             'description',
             'fichier',
@@ -129,9 +134,19 @@ class CoursDocumentSerializer(serializers.ModelSerializer):
             'date_upload',
         ]
         read_only_fields = ['formateur', 'date_upload']
+        extra_kwargs = {'classes': {'required': False}}
 
     def get_fichier_url(self, obj):
         request = self.context.get('request')
         if obj.fichier and request:
-            return request.build_absolute_uri(obj.fichier.url)
+            url = request.build_absolute_uri(obj.fichier.url)
+            # Derrière le proxy HTTPS, Django voit du http : un lien http est bloqué au téléchargement sur mobile
+            return url.replace('http://', 'https://', 1) if url.startswith('http://') and not request.get_host().startswith(('localhost', '127.')) else url
         return None
+
+    def get_classes_noms(self, obj):
+        return [str(c) for c in obj.classes.all()]
+
+    def get_nom_fichier(self, obj):
+        import os
+        return os.path.basename(obj.fichier.name) if obj.fichier else ''

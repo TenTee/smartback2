@@ -40,6 +40,8 @@ class Formateur(models.Model):
 class CoursDocument(models.Model):
     formateur = models.ForeignKey(Formateur, on_delete=models.CASCADE, related_name="cours_documents")
     module = models.ForeignKey(Module, on_delete=models.CASCADE, related_name="cours_documents")
+    # Classes destinataires : seuls leurs étudiants voient le support
+    classes = models.ManyToManyField("academique.Classe", related_name="cours_documents", blank=True)
     titre = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     fichier = models.FileField(upload_to="cours/documents/")
