@@ -97,6 +97,22 @@ class DemandeLivrerView(APIView):
         erreurs = []
         for ligne in demande.lignes.all():
             qte = ligne.quantite_accordee or ligne.quantite_demandee
+            if getattr(ligne.article, "type_article", "equipement") == "consommable":
+                # Consommable : sortie de stock en quantité
+                from django.db import transaction
+                from inventaires.models import Article as _Article, MouvementStock
+                with transaction.atomic():
+                    a = _Article.objects.select_for_update().get(pk=ligne.article_id)
+                    if a.stock < qte:
+                        erreurs.append(f"{a.nom}: seulement {a.stock}/{qte} {a.unite} en stock")
+                        continue
+                    a.stock -= qte
+                    a.save(update_fields=["stock"])
+                    MouvementStock.objects.create(article=a, type="sortie", quantite=qte, stock_apres=a.stock,
+                                                  destinataire=str(demande.demandeur or "")[:200],
+                                                  motif=f"Livraison demande {demande.reference}",
+                                                  utilisateur=request.user if request.user.is_authenticated else None)
+                continue
             exemplaires_dispo = Exemplaire.objects.filter(
                 article=ligne.article, statut="en_stock"
             )[:qte]
