@@ -485,15 +485,37 @@ class NoteViewSet(viewsets.ModelViewSet):
                 Q(classe__annee_academique_id=year_id)
             )
 
+        # Une ligne par module du programme de la classe (notée ou non), comme sur le relevé :
+        # deux étudiants de la même classe voient la même liste de modules.
+        from types import SimpleNamespace
+        from attestations.reussite import _modules_attendus
+        inscriptions = Inscription.objects.filter(etudiant=etudiant, classe__isnull=False).select_related("classe").order_by("-date_inscription")
+        inscription = (inscriptions.filter(classe__annee_academique_id=year_id).first() if year_id else None) or inscriptions.first()
+
+        def score(n):
+            return (3 if n.session == n.module.semestre else 0) + (n.note_finale is not None) * 2 + (n.note_cc is not None) + (n.note_sn is not None)
+
+        meilleures = {}
+        for n in notes:
+            if n.module_id not in meilleures or score(n) > score(meilleures[n.module_id]):
+                meilleures[n.module_id] = n
+        lignes = []
+        for module in _modules_attendus(inscription.classe if inscription else None, inscription, list(meilleures.values())):
+            lignes.append(meilleures.pop(module.id, None) or SimpleNamespace(
+                id=None, module=module, session=module.semestre, classe_id=inscription.classe_id if inscription else None,
+                classe=inscription.classe if inscription else None,
+                note_cc=None, note_sn=None, note_rattrapage=None, note_finale=None,
+            ))
+        lignes.extend(sorted(meilleures.values(), key=lambda n: n.module.nom))
         if session:
-            notes = notes.filter(session=session)
+            lignes = [n for n in lignes if (n.module.semestre or n.session) == session]
 
         data = []
-        for note in notes:
+        for note in lignes:
             data.append({
                 "id": note.id,
                 "etudiant_id": etudiant.id,
-                "session": note.session,
+                "session": note.module.semestre or note.session,
                 "module_id": note.module.id,
                 "module_nom": note.module.nom,
                 "module_semestre": getattr(note.module, 'semestre', '') or note.session,
@@ -522,12 +544,15 @@ class NoteViewSet(viewsets.ModelViewSet):
         if own is not None and not request.user.is_staff and own.pk != etudiant.pk:
             return Response({"error": "Accès refusé."}, status=403)
 
-        inscription = Inscription.objects.filter(
+        year_id = get_current_academic_year_id()
+        inscriptions = Inscription.objects.filter(
             etudiant=etudiant,
             classe__isnull=False,
         ).select_related(
             'classe__filiere', 'classe__cycle', 'classe__niveau', 'classe__annee_academique'
-        ).order_by('-date_inscription').first()
+        ).order_by('-date_inscription')
+        # Inscription de l'année consultée en priorité (sinon la plus récente)
+        inscription = (inscriptions.filter(classe__annee_academique_id=year_id).first() if year_id else None) or inscriptions.first()
 
         from academique.models import ConfigurationEtablissement, ParametresGlobaux
         config = ConfigurationEtablissement.get_config()
@@ -535,7 +560,6 @@ class NoteViewSet(viewsets.ModelViewSet):
 
         notes_qs = Note.objects.filter(etudiant=etudiant).select_related("module", "classe")
 
-        year_id = get_current_academic_year_id()
         if year_id:
             notes_qs = notes_qs.filter(
                 Q(annee_academique_ref_id=year_id) |
@@ -667,12 +691,29 @@ class NoteViewSet(viewsets.ModelViewSet):
             if key not in deduped_notes or note_score(note) > note_score(deduped_notes[key]):
                 deduped_notes[key] = note
 
+        # Le relevé suit le PROGRAMME de la classe : tous ses modules apparaissent, notés ou non,
+        # pour que deux étudiants de la même classe aient exactement le même relevé (mêmes modules,
+        # mêmes crédits) ; seules les notes diffèrent. Un module noté hors programme reste affiché.
+        from types import SimpleNamespace
+        from attestations.reussite import _modules_attendus
+        programme = _modules_attendus(
+            inscription.classe if inscription else None, inscription, list(deduped_notes.values())
+        )
+        lignes = []
+        for module in programme:
+            note = deduped_notes.pop(module.id, None)
+            lignes.append(note or SimpleNamespace(
+                id=None, module=module, session=module.semestre,
+                note_cc=None, note_sn=None, note_finale=None,
+            ))
+        lignes.extend(sorted(deduped_notes.values(), key=lambda n: n.module.nom))
+
         by_semester = {}
-        for note in deduped_notes.values():
+        for note in lignes:
             label = note.module.semestre or note.session or "Semestre 1"
             by_semester.setdefault(label, []).append(note)
 
-        for session_label in ["Semestre 1", "Semestre 2"]:
+        for session_label in ["Semestre 1", "Semestre 2"] + sorted(k for k in by_semester if k not in ("Semestre 1", "Semestre 2")):
             sem_notes = by_semester.get(session_label, [])
             if not sem_notes:
                 continue
@@ -696,12 +737,13 @@ class NoteViewSet(viewsets.ModelViewSet):
         if inscription and inscription.classe_id:
             classe_etudiants = list(Inscription.objects.filter(
                 classe=inscription.classe
-            ).values_list('etudiant_id', flat=True))
+            ).values_list('etudiant_id', flat=True).distinct())
             effectif = len(classe_etudiants)
 
             moyennes_classe = []
             for etu_id in classe_etudiants:
-                etu_notes = Note.objects.filter(etudiant_id=etu_id).select_related("module")
+                # Mêmes règles que le relevé : notes de cette classe uniquement
+                etu_notes = Note.objects.filter(etudiant_id=etu_id, classe_id=inscription.classe_id).select_related("module")
                 if year_id:
                     etu_notes = etu_notes.filter(
                         Q(annee_academique_ref_id=year_id) |

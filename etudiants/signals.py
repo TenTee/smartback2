@@ -48,27 +48,43 @@ def create_or_update_notes_on_inscription(sender, instance, created, **kwargs):
     # Modules de la classe
     current_modules = set(instance.classe.modules.all())
     
-    # Sessions à initialiser (on pourrait boucler sur les semestres si besoin)
-    sessions = ["Semestre 1", "Semestre 2"] # Exemple simplifié
+    # Une ligne de note par module, dans le semestre du module
+    for module in current_modules:
+        creer_note_vide(instance.etudiant, module, instance.classe)
 
-    for session in sessions:
-        # Création des notes manquantes
-        for module in current_modules:
-            Note.objects.get_or_create(
-                etudiant=instance.etudiant,
-                module=module,
-                classe=instance.classe, # Important: on lie à la classe
-                session=session,
-                defaults={
-                    "note_cc": None,
-                    "note_sn": None,
-                    "note_rattrapage": None,
-                    "note_finale": None,
-                }
-            )
 
-    # Nettoyage facultatif : supprimer les notes si l'étudiant change de classe/modules ?
-    # Pour l'instant on se concentre sur la création.
+def creer_note_vide(etudiant, module, classe):
+    """Ligne de note vide (à saisir) pour un module du programme, sauf si l'étudiant en a déjà une."""
+    if Note.objects.filter(etudiant=etudiant, module=module, classe=classe).exists():
+        return
+    Note.objects.get_or_create(
+        etudiant=etudiant, module=module, classe=classe, session=module.semestre or "Semestre 1",
+        evaluation=None,
+        defaults={"note_cc": None, "note_sn": None, "note_rattrapage": None, "note_finale": None},
+    )
+
+
+def _modules_ajoutes_a_la_classe(sender, instance, action, pk_set, **kwargs):
+    """Module ajouté au programme d'une classe : lignes de notes pour tous les étudiants déjà inscrits."""
+    if action != "post_add" or not pk_set:
+        return
+    from academique.models import Classe
+    from modules.models import Module
+    if not isinstance(instance, Classe):
+        return
+    modules = list(Module.objects.filter(pk__in=pk_set))
+    for ins in Inscription.objects.filter(classe=instance).select_related("etudiant"):
+        for module in modules:
+            creer_note_vide(ins.etudiant, module, instance)
+
+
+def _brancher_programme():
+    from django.db.models.signals import m2m_changed
+    from academique.models import Classe
+    m2m_changed.connect(_modules_ajoutes_a_la_classe, sender=Classe.modules.through, dispatch_uid="notes_programme_classe")
+
+
+_brancher_programme()
 
 @receiver(post_delete, sender=Etudiant)
 def delete_notes(sender, instance, **kwargs):
