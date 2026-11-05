@@ -52,6 +52,8 @@ class ParametresGlobaux(TimeStampedModel):
 
 class ConfigurationEtablissement(TimeStampedModel):
     nom = models.CharField(max_length=255, default="SmartCampus")
+    # Nom court / sigle (ex. « IFPT ») : nom de l'application installée sur les téléphones
+    nom_court = models.CharField(max_length=30, blank=True, default="")
     logo = models.ImageField(upload_to="etablissement/logos/", null=True, blank=True)
     logo_entete = models.ImageField(upload_to="etablissement/logos/", null=True, blank=True, help_text="Logo pour l'en-tête des documents (relevés, certificats)")
     adresse = models.TextField(blank=True)
