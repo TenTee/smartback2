@@ -116,6 +116,8 @@ class DocumentDelivreViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["post"], url_path="mes-documents")
     def mes_documents(self, request):
+        # Les étudiants ne téléchargent plus leurs documents : ils en font la demande à l'administration.
+        return Response({"detail": "Les documents officiels sont délivrés par l'administration : faites-en la demande depuis « Mes documents »."}, status=400)
         etu = getattr(request.user, "etudiant_profile", None) if _profil(request.user) == "etudiant" else None
         if etu is None:
             raise PermissionDenied("Réservé aux étudiants.")

@@ -12,7 +12,9 @@ def droit_logistique(user):
     if profil(user) != "personnel":
         return "none"
     from users.models import Role
-    return Role.objects.filter(code=user.role).values_list("can_manage_logistique", flat=True).first() or "none"
+    from users.serializers import niveau_acces
+    # Normalisé : accepte aussi les anciennes valeurs (True / « true »…) des rôles créés avant les niveaux d'accès
+    return niveau_acces(Role.objects.filter(code=user.role).values_list("can_manage_logistique", flat=True).first())
 
 
 def peut_signaler(user):

@@ -540,9 +540,11 @@ class NoteViewSet(viewsets.ModelViewSet):
             return Response({"error": "Étudiant introuvable"}, status=404)
 
         # Un étudiant connecté ne peut consulter que son propre relevé
+        # Le relevé officiel est délivré par l'administration : un étudiant en fait la demande depuis son portail.
+        # (404 et non 403 : le front déconnecte sur 403.)
         own = getattr(request.user, "etudiant_profile", None)
-        if own is not None and not request.user.is_staff and own.pk != etudiant.pk:
-            return Response({"error": "Accès refusé."}, status=403)
+        if own is not None and not request.user.is_staff:
+            return Response({"error": "Le relevé de notes est délivré par l'administration : faites-en la demande depuis « Mes documents »."}, status=404)
 
         year_id = get_current_academic_year_id()
         inscriptions = Inscription.objects.filter(

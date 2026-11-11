@@ -45,3 +45,47 @@ class DocumentDelivre(models.Model):
 
     def __str__(self):
         return f"{self.get_type_display()} {self.numero}"
+
+
+class DemandeDocument(models.Model):
+    """Demande d'un document officiel par un étudiant depuis son portail.
+
+    L'étudiant ne télécharge plus lui-même ses documents : il en fait la demande, l'administration
+    le génère, l'imprime et le lui remet (en attente → prêt à retirer → remis, ou rejeté).
+    """
+
+    EN_ATTENTE, PRETE, REMISE, REJETEE = "en_attente", "prete", "remise", "rejetee"
+    STATUTS = [(EN_ATTENTE, "En attente"), (PRETE, "Prêt à retirer"), (REMISE, "Remis"), (REJETEE, "Rejetée")]
+    TYPES = [(DocumentDelivre.CERTIFICAT, "Certificat de scolarité"), (DocumentDelivre.RELEVE, "Relevé de notes"),
+             (DocumentDelivre.CARTE, "Carte d'étudiant")]
+
+    reference = models.CharField(max_length=30, unique=True, editable=False)
+    etudiant = models.ForeignKey("etudiants.Etudiant", on_delete=models.CASCADE, related_name="demandes_documents")
+    annee_academique = models.ForeignKey("academique.AnneeAcademique", on_delete=models.SET_NULL, null=True, blank=True, related_name="demandes_documents")
+    type = models.CharField(max_length=20, choices=TYPES)
+    nombre = models.PositiveSmallIntegerField(default=1, help_text="Nombre d'exemplaires")
+    motif = models.CharField(max_length=255, blank=True, default="", help_text="Usage prévu (banque, stage, visa…)")
+    statut = models.CharField(max_length=20, choices=STATUTS, default=EN_ATTENTE)
+    reponse = models.CharField(max_length=255, blank=True, default="", help_text="Message de l'administration (motif de rejet, consignes de retrait…)")
+    document = models.ForeignKey(DocumentDelivre, on_delete=models.SET_NULL, null=True, blank=True, related_name="demandes")
+    cree_le = models.DateTimeField(auto_now_add=True)
+    traite_le = models.DateTimeField(null=True, blank=True)
+    traite_par = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="demandes_documents_traitees")
+    remise_le = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-cree_le", "-id"]
+        indexes = [models.Index(fields=["statut", "type"])]
+
+    def save(self, *args, **kwargs):
+        if not self.reference:
+            from django.utils import timezone
+            base = f"DOC-{timezone.localdate():%Y%m}-"
+            n = DemandeDocument.objects.filter(reference__startswith=base).count() + 1
+            while DemandeDocument.objects.filter(reference=f"{base}{n:04d}").exists():
+                n += 1
+            self.reference = f"{base}{n:04d}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.reference} — {self.get_type_display()}"
