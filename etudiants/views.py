@@ -139,12 +139,23 @@ class EtudiantDocumentUploadView(APIView):
             return Response({"error": "Aucun fichier reçu"}, status=status.HTTP_400_BAD_REQUEST)
 
         type_document = request.data.get("type_document", "Document")
+        est_photo = "photo" in str(type_document or "").lower()
+        if est_photo and not str(getattr(fichier, "content_type", "") or "").startswith("image/"):
+            return Response({"error": "La photo d'identité doit être une image (JPEG ou PNG)."}, status=status.HTTP_400_BAD_REQUEST)
 
+        anciennes = list(etudiant.documents.filter(type_document__icontains="photo")) if est_photo else []
         doc = EtudiantDocument.objects.create(
             etudiant=etudiant,
             fichier=fichier,
             type_document=type_document,
         )
+        # Une seule photo d'identité par étudiant : la nouvelle remplace les précédentes (cartes, relevés…)
+        for ancienne in anciennes:
+            try:
+                ancienne.fichier.delete(save=False)
+            except Exception:  # noqa: BLE001 — fichier déjà absent du stockage
+                pass
+            ancienne.delete()
 
         serializer = EtudiantDocumentSerializer(doc)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
