@@ -89,6 +89,8 @@ VAPID_EMAIL = os.environ.get('VAPID_EMAIL', '')
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Réponses JSON compressées (listes d'étudiants, notes…) : chargement bien plus rapide
+    'django.middleware.gzip.GZipMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

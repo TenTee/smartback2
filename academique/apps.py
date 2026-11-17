@@ -6,6 +6,9 @@ class AcademiqueConfig(AppConfig):
     name = "academique"
 
     def ready(self):
+        # Optimisation automatique des images importées (tous les modèles)
+        from smart_back.medias import brancher
+        brancher()
         # Import signals to connect post_save handlers
         try:
             import academique.signals  # noqa: F401
