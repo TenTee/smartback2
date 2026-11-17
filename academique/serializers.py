@@ -387,11 +387,17 @@ class ClasseSerializer(serializers.ModelSerializer):
     niveau_nom = serializers.CharField(source="niveau.nom", read_only=True)
     annee_academique_libelle = serializers.CharField(source="annee_academique.libelle", read_only=True)
     name = serializers.CharField(source="nom", read_only=True)
+    sigle = serializers.SerializerMethodField()
+
+    def get_sigle(self, obj):
+        from .sigles import sigle_classe
+        return sigle_classe(obj)
 
     class Meta:
         model = Classe
         fields = [
             "id",
+            "sigle",
             "filiere",
             "filiere_nom",
             "cycle",

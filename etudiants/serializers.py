@@ -19,7 +19,12 @@ class SanctionDisciplinaireSerializer(serializers.ModelSerializer):
 
 # --- Inscriptions ---
 class InscriptionSerializer(serializers.ModelSerializer):
+    def get_classe_sigle(self, obj):
+        from academique.sigles import sigle_classe
+        return sigle_classe(obj.classe) if obj.classe_id else ""
+
     classe_nom = serializers.CharField(source='classe.nom', read_only=True)
+    classe_sigle = serializers.SerializerMethodField()
     niveau_nom = serializers.CharField(source='niveau.nom', read_only=True)
     filiere_nom = serializers.CharField(source='niveau.cycle.filiere.nom', read_only=True)
     cycle_id = serializers.IntegerField(source="niveau.cycle_id", read_only=True)
@@ -33,6 +38,7 @@ class InscriptionSerializer(serializers.ModelSerializer):
             'etudiant',
             'classe',
             'classe_nom',
+            'classe_sigle',
             'niveau',
             'niveau_nom',
             'filiere_nom',
@@ -46,10 +52,21 @@ class InscriptionSerializer(serializers.ModelSerializer):
         ]
 
 
+class FiliereEtudiantSerializer(serializers.ModelSerializer):
+    """Filière résumée pour les listes d'étudiants (sans les comptages coûteux du FiliereSerializer)."""
+    departement_nom = serializers.CharField(source="departement.nom", read_only=True, default="")
+    universite_tutelle_nom = serializers.CharField(source="departement.universite_tutelle.nom", read_only=True, default="")
+    name = serializers.CharField(source="nom", read_only=True)
+
+    class Meta:
+        model = Filiere
+        fields = ["id", "nom", "name", "code", "departement", "departement_nom", "universite_tutelle_nom"]
+
+
 # --- Étudiant ---
 class EtudiantSerializer(serializers.ModelSerializer):
     # Lecture
-    filiere_details = FiliereSerializer(source="filiere", read_only=True)
+    filiere_details = FiliereEtudiantSerializer(source="filiere", read_only=True)
     
     # Écriture
     filiere_id = serializers.PrimaryKeyRelatedField(
