@@ -1,3 +1,4 @@
+import datetime as dt
 from decimal import Decimal
 from django.db import models
 from django.db.models import Max, Sum, Value, DecimalField, Count, Q
@@ -107,13 +108,24 @@ class PaiementDetail(generics.RetrieveUpdateDestroyAPIView):
             raise ValidationError({"montant_paye": ["Le montant doit être supérieur à 0."]})
         nouveau_compte = serializer.validated_data.get("compte_tresorerie")
         _controler_tresorerie(avant, nouveau_compte if isinstance(nouveau_compte, CompteTresorerie) else None)
+        ancienne_date = timezone.localtime(avant.date_paiement).date() if avant.date_paiement else None
+        nouvelle_date = self._date_demandee(avant, nouveau_compte, ancienne_date)
         with transaction.atomic():
             p = serializer.save()
-            recalculer_echeancier(p.etudiant_id, p.annee_academique_id, p.filiere_id)
             from tresorerie.models import Operation
+            if nouvelle_date:
+                # date_paiement est en « auto_now_add » : modifiée directement, en gardant l'heure d'origine
+                heure = timezone.localtime(avant.date_paiement).time() if avant.date_paiement else dt.time(12, 0)
+                Paiement.objects.filter(pk=p.pk).update(
+                    date_paiement=timezone.make_aware(dt.datetime.combine(nouvelle_date, heure)))
+                p.refresh_from_db()
+                Operation.objects.filter(source_type="paiement", source_id=p.pk).update(date=nouvelle_date)
+            recalculer_echeancier(p.etudiant_id, p.annee_academique_id, p.filiere_id)
             op = Operation.objects.filter(source_type="paiement", source_id=p.pk).first()
             if op:
                 changements = []
+                if nouvelle_date:
+                    changements.append(f"date {ancienne_date:%d/%m/%Y} → {nouvelle_date:%d/%m/%Y}" if ancienne_date else f"date → {nouvelle_date:%d/%m/%Y}")
                 if Decimal(ancien["montant"]) != Decimal(p.montant_paye):
                     changements.append(f"montant {Decimal(ancien['montant']):,.0f} → {Decimal(p.montant_paye):,.0f}".replace(",", " "))
                 if ancien["type"] != p.paiement_type:
@@ -125,6 +137,30 @@ class PaiementDetail(generics.RetrieveUpdateDestroyAPIView):
                          f"{' : ' + ', '.join(changements) if changements else ''}{' — motif : ' + motif if motif else ''}")
                 op.notes = f"{op.notes}\n{trace}".strip()
                 op.save(update_fields=["notes"])
+
+    def _date_demandee(self, paiement, nouveau_compte, ancienne_date):
+        """Nouvelle date de paiement demandée (« date_paiement » : AAAA-MM-JJ), contrôlée ; None si inchangée."""
+        from django.utils.dateparse import parse_date
+        brut = self.request.data.get("date_paiement")
+        if not brut:
+            return None
+        d = parse_date(str(brut)[:10])
+        if not d:
+            raise ValidationError({"date_paiement": ["Date invalide (format attendu : AAAA-MM-JJ)."]})
+        if d == ancienne_date:
+            return None
+        if d > timezone.localdate():
+            raise ValidationError({"date_paiement": ["La date de paiement ne peut pas être dans le futur."]})
+        from tresorerie.models import CompteTresorerie, Operation
+        from tresorerie.services import OperationVerrouillee, verifier_verrou
+        op = Operation.objects.filter(source_type="paiement", source_id=paiement.pk).select_related("compte").first()
+        compte = nouveau_compte if isinstance(nouveau_compte, CompteTresorerie) else (op.compte if op else None)
+        if compte:
+            try:
+                verifier_verrou(d, compte)
+            except OperationVerrouillee as e:
+                raise ValidationError({"date_paiement": [str(e)]})
+        return d
 
     def perform_destroy(self, instance):
         _controler_tresorerie(instance)

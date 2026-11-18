@@ -170,6 +170,8 @@ def synchroniser_paiement(paiement, compte=None):
             if k == "annee_academique_id" and not v:
                 continue
             setattr(op, k, v)
+        if op.date != date:
+            op.date = date  # date du paiement modifiée
         op.save()
         return op
     return creer_operation(type=Operation.RECETTE, date=date, statut=Operation.VALIDEE, source="scolarite",

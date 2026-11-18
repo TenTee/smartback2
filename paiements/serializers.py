@@ -173,6 +173,7 @@ class StudentPaymentPlanSerializer(serializers.ModelSerializer):
 
 class PaiementSerializer(serializers.ModelSerializer):
     etudiant_nom = serializers.CharField(source="etudiant.nom", read_only=True)
+    etudiant_matricule = serializers.CharField(source="etudiant.matricule", read_only=True, default="")
     filiere_nom = serializers.CharField(source="filiere.nom", read_only=True)
     frais_libelle = serializers.CharField(source="frais.libelle", read_only=True)
     classe_nom = serializers.CharField(source="frais.classe.nom", read_only=True)
@@ -185,6 +186,7 @@ class PaiementSerializer(serializers.ModelSerializer):
             "id",
             "etudiant",
             "etudiant_nom",
+            "etudiant_matricule",
             "filiere",
             "filiere_nom",
             "frais",
