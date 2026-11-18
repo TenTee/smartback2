@@ -53,6 +53,9 @@ router.register(r"facultes", UniversiteTutelleViewSet, basename="academique-facu
 router.register(r"domaines", DepartementViewSet, basename="academique-domaine")
 router.register(r"levels", LevelViewSet, basename="academique-level")
 
+from .tableau_de_bord import TableauDeBordAdminView  # noqa: E402
+
 urlpatterns = [
+    path("tableau-de-bord/", TableauDeBordAdminView.as_view(), name="tableau-de-bord-admin"),
     path("", include(router.urls)),
 ]
